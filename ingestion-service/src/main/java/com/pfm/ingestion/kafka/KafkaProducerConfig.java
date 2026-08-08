@@ -1,6 +1,7 @@
 package com.pfm.ingestion.kafka;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.pfm.common.domain.FutureTransaction;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -27,7 +28,9 @@ public class KafkaProducerConfig {
         configProps.put(ProducerConfig.ACKS_CONFIG, "all");
         configProps.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
 
-        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        ObjectMapper objectMapper = new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
         return new DefaultKafkaProducerFactory<>(configProps, new StringSerializer(),
                 new JsonSerializer<FutureTransaction>(objectMapper));
     }

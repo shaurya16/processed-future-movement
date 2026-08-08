@@ -45,7 +45,7 @@ class IngestionServiceTest {
         assertEquals(3, result.errors().get(0).lineNumber());
         assertFalse(result.cached());
         verify(kafkaTemplate, times(2))
-                .send(eq("future-transactions"), eq("CL432100020001|SGXFUNK2010-09-10"), any(FutureTransaction.class));
+                .send(eq("future-transactions"), eq("CL432100020001|SGXFUNK20100910"), any(FutureTransaction.class));
     }
 
     @Test
@@ -82,6 +82,51 @@ class IngestionServiceTest {
 
         KafkaPublishException exception = assertThrows(KafkaPublishException.class, () -> service.ingest(false));
         assertTrue(exception.getMessage().contains("2"));
+    }
+
+    @Test
+    void abortsSendingAfterConsecutiveFailureThresholdToBoundWorstCaseBlockingTime() throws URISyntaxException {
+        CompletableFuture<SendResult<String, FutureTransaction>> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new RuntimeException("broker unreachable"));
+        when(kafkaTemplate.send(anyString(), anyString(), any(FutureTransaction.class))).thenReturn(failed);
+
+        Path fixture = Path.of(getClass().getClassLoader().getResource("many-valid-records-sample.txt").toURI());
+        IngestionProperties properties = new IngestionProperties(fixture.toString(), "future-transactions");
+        IngestionService manyRecordsService =
+                new IngestionService(new FutureTransactionParser(), kafkaTemplate, new IngestionRegistry(), properties);
+
+        // 6 valid records in the fixture, all sends fail: the service should stop after
+        // MAX_CONSECUTIVE_SEND_FAILURES (5) rather than blocking up to 10s on every one.
+        assertThrows(KafkaPublishException.class, () -> manyRecordsService.ingest(false));
+
+        verify(kafkaTemplate, times(5)).send(anyString(), anyString(), any(FutureTransaction.class));
+    }
+
+    @Test
+    void partialKafkaSendFailureIsNotCachedSoTheNextNonForcedCallRetries() {
+        CompletableFuture<SendResult<String, FutureTransaction>> success = CompletableFuture.completedFuture(null);
+        CompletableFuture<SendResult<String, FutureTransaction>> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new RuntimeException("broker unreachable"));
+
+        // Each ingest() attempt over small-sample.txt has 2 valid records: alternate
+        // success/failure so every attempt is a genuine partial failure (1 published, 1 failed).
+        when(kafkaTemplate.send(anyString(), anyString(), any(FutureTransaction.class)))
+                .thenReturn(success, failed, success, failed);
+
+        IngestionResult first = service.ingest(false);
+        assertEquals(1, first.published());
+        assertFalse(first.cached());
+        assertTrue(first.errors().stream().anyMatch(e -> e.lineNumber() == -1),
+                "expected a Kafka send failure (lineNumber -1) among the errors");
+
+        // Decision (finding #5): a result with un-retried Kafka send failures must NOT be
+        // cached, because a subsequent non-forced call must retry the failed records rather
+        // than silently replaying a known-partial ingestion as if it fully succeeded.
+        IngestionResult second = service.ingest(false);
+        assertFalse(second.cached(), "a partial-failure result must not be served from cache");
+        assertEquals(1, second.published());
+
+        verify(kafkaTemplate, times(4)).send(anyString(), anyString(), any(FutureTransaction.class));
     }
 
     @Test
