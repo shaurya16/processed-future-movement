@@ -1,0 +1,12 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: ingestion-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+ingestion:
+  file-path: ${INGESTION_FILE_PATH:sample-data/Input.txt}
+  topic: future-transactions
