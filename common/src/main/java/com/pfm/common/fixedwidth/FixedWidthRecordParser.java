@@ -12,6 +12,10 @@ public class FixedWidthRecordParser {
 
     public <T> T parse(String line, int lineNumber, Class<T> type) {
         RecordComponent[] components = type.getRecordComponents();
+        if (components == null) {
+            throw new FixedWidthParseException(lineNumber, line,
+                    "Type " + type.getName() + " is not a record");
+        }
         Object[] args = new Object[components.length];
         Class<?>[] paramTypes = new Class<?>[components.length];
 
@@ -21,6 +25,11 @@ public class FixedWidthRecordParser {
             if (field == null) {
                 throw new FixedWidthParseException(lineNumber, line,
                         "Record component '" + component.getName() + "' has no @FixedWidthField");
+            }
+            if (component.getType() != String.class) {
+                throw new FixedWidthParseException(lineNumber, line,
+                        "Record component '" + component.getName() + "' must be declared as String, was "
+                                + component.getType().getName());
             }
 
             int startIndex = field.start() - 1;
@@ -37,8 +46,9 @@ public class FixedWidthRecordParser {
 
         try {
             Constructor<T> constructor = type.getDeclaredConstructor(paramTypes);
+            constructor.setAccessible(true);
             return constructor.newInstance(args);
-        } catch (ReflectiveOperationException e) {
+        } catch (ReflectiveOperationException | IllegalArgumentException e) {
             throw new FixedWidthParseException(lineNumber, line,
                     "Failed to construct " + type.getSimpleName() + ": " + e.getMessage());
         }

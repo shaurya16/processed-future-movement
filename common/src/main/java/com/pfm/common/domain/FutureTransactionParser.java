@@ -20,7 +20,7 @@ public class FutureTransactionParser {
 
     public FutureTransaction parse(String line, int lineNumber) {
         RawFutureTransaction raw = recordParser.parse(line, lineNumber, RawFutureTransaction.class);
-        return factory.from(raw, lineNumber);
+        return factory.from(raw, lineNumber, line);
     }
 
     public ParseResult parseAll(List<String> lines) {
@@ -32,7 +32,7 @@ public class FutureTransactionParser {
             try {
                 records.add(parse(lines.get(i), lineNumber));
             } catch (FixedWidthParseException e) {
-                errors.add(new ParseError(e.lineNumber(), e.rawLine(), e.getMessage()));
+                errors.add(new ParseError(e.lineNumber(), e.rawLine(), e.reason()));
             }
         }
 
