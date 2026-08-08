@@ -26,7 +26,7 @@ class FutureTransactionFactoryTest {
     void convertsRealBuyRecord() {
         RawFutureTransaction raw = recordParser.parse(LINE_1, 1, RawFutureTransaction.class);
 
-        FutureTransaction result = factory.from(raw, 1);
+        FutureTransaction result = factory.from(raw, 1, LINE_1);
 
         assertEquals("4321", result.clientNumber());
         assertEquals("0002", result.accountNumber());
@@ -38,8 +38,11 @@ class FutureTransactionFactoryTest {
         assertEquals(1L, result.quantityLong());
         assertEquals(0L, result.quantityShort());
         assertEquals(new BigDecimal("-0.60"), result.exchBrokerFee());
+        assertEquals('D', result.exchBrokerFeeDC());
         assertEquals(new BigDecimal("-0.30"), result.clearingFee());
+        assertEquals('D', result.clearingFeeDC());
         assertEquals(new BigDecimal("0.00"), result.commission());
+        assertEquals('D', result.commissionDC());
         assertEquals(LocalDate.of(2010, 8, 20), result.transactionDate());
         assertEquals(new BigDecimal("9250.0000000"), result.transactionPrice());
         assertEquals('O', result.openCloseCode());
@@ -49,7 +52,7 @@ class FutureTransactionFactoryTest {
     void convertsRealSellRecord() {
         RawFutureTransaction raw = recordParser.parse(LINE_13, 13, RawFutureTransaction.class);
 
-        FutureTransaction result = factory.from(raw, 13);
+        FutureTransaction result = factory.from(raw, 13, LINE_13);
 
         assertEquals("0003", result.accountNumber());
         assertEquals("CME", result.exchangeCode());
@@ -58,7 +61,9 @@ class FutureTransactionFactoryTest {
         assertEquals(0L, result.quantityLong());
         assertEquals(3L, result.quantityShort());
         assertEquals(new BigDecimal("0.00"), result.exchBrokerFee());
+        assertEquals('D', result.exchBrokerFeeDC());
         assertEquals(new BigDecimal("-0.15"), result.clearingFee());
+        assertEquals('D', result.clearingFeeDC());
         assertEquals(LocalDate.of(2010, 8, 19), result.transactionDate());
         assertEquals(new BigDecimal("9330.0000000"), result.transactionPrice());
     }
@@ -68,7 +73,7 @@ class FutureTransactionFactoryTest {
         RawFutureTransaction base = recordParser.parse(LINE_1, 1, RawFutureTransaction.class);
         RawFutureTransaction withNegativeLong = withField(base, "quantityLongSign", "-");
 
-        FutureTransaction result = factory.from(withNegativeLong, 1);
+        FutureTransaction result = factory.from(withNegativeLong, 1, LINE_1);
 
         assertEquals(-1L, result.quantityLong());
     }
@@ -78,7 +83,7 @@ class FutureTransactionFactoryTest {
         RawFutureTransaction base = recordParser.parse(LINE_1, 1, RawFutureTransaction.class);
         RawFutureTransaction withPlusLong = withField(base, "quantityLongSign", "+");
 
-        FutureTransaction result = factory.from(withPlusLong, 1);
+        FutureTransaction result = factory.from(withPlusLong, 1, LINE_1);
 
         assertEquals(1L, result.quantityLong());
     }
@@ -88,9 +93,22 @@ class FutureTransactionFactoryTest {
         RawFutureTransaction base = recordParser.parse(LINE_1, 1, RawFutureTransaction.class);
         RawFutureTransaction withCredit = withField(base, "exchBrokerFeeDC", "C");
 
-        FutureTransaction result = factory.from(withCredit, 1);
+        FutureTransaction result = factory.from(withCredit, 1, LINE_1);
 
         assertEquals(new BigDecimal("0.60"), result.exchBrokerFee());
+        assertEquals('C', result.exchBrokerFeeDC());
+    }
+
+    @Test
+    void invalidDebitCreditIndicatorThrows() {
+        RawFutureTransaction base = recordParser.parse(LINE_1, 1, RawFutureTransaction.class);
+        RawFutureTransaction withBadIndicator = withField(base, "exchBrokerFeeDC", "X");
+
+        FixedWidthParseException exception = assertThrows(FixedWidthParseException.class,
+            () -> factory.from(withBadIndicator, 1, LINE_1));
+
+        assertEquals(1, exception.lineNumber());
+        assertEquals(LINE_1, exception.rawLine());
     }
 
     @Test
@@ -99,9 +117,10 @@ class FutureTransactionFactoryTest {
         RawFutureTransaction withBadQuantity = withField(base, "quantityLongRaw", "AAAAAAAAAA");
 
         FixedWidthParseException exception = assertThrows(FixedWidthParseException.class,
-            () -> factory.from(withBadQuantity, 1));
+            () -> factory.from(withBadQuantity, 1, LINE_1));
 
         assertEquals(1, exception.lineNumber());
+        assertEquals(LINE_1, exception.rawLine());
     }
 
     @Test
@@ -109,7 +128,7 @@ class FutureTransactionFactoryTest {
         RawFutureTransaction base = recordParser.parse(LINE_1, 1, RawFutureTransaction.class);
         RawFutureTransaction withBadDate = withField(base, "expirationDateRaw", "20109999");
 
-        assertThrows(FixedWidthParseException.class, () -> factory.from(withBadDate, 1));
+        assertThrows(FixedWidthParseException.class, () -> factory.from(withBadDate, 1, LINE_1));
     }
 
     /**

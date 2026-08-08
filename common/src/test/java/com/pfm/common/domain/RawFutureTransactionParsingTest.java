@@ -1,5 +1,6 @@
 package com.pfm.common.domain;
 
+import com.pfm.common.fixedwidth.FixedWidthField;
 import com.pfm.common.fixedwidth.FixedWidthRecordParser;
 import org.junit.jupiter.api.Test;
 
@@ -14,6 +15,16 @@ class RawFutureTransactionParsingTest {
     // Real line 13: client 4321, account 0003, CME/N1 sell, quantityShort=3.
     private static final String LINE_13 =
         "315CL  432100030001FCC   FUCME N1    20100910JPY01S 0000000000 0000000003000000000000DUSD000000000015DUSD000000000000DJPY20100819059475      000308000093300000000             O";
+
+    // Package-private (no access modifier) record living in com.pfm.common.domain, deliberately
+    // parsed here — from the same package as this test but a *different* package than
+    // FixedWidthRecordParser (com.pfm.common.fixedwidth). Reflective construction from another
+    // package used to surface as IllegalAccessException, wrapped by the parser as if it were a
+    // per-line data problem; constructor.setAccessible(true) fixed that, so this should now
+    // parse cleanly.
+    record PackagePrivateRecord(
+        @FixedWidthField(start = 1, length = 3) String recordCode
+    ) {}
 
     private final FixedWidthRecordParser parser = new FixedWidthRecordParser();
 
@@ -83,5 +94,12 @@ class RawFutureTransactionParsingTest {
         assertEquals("000308", raw.externalNumber());
         assertEquals("000093300000000", raw.transactionPriceRaw());
         assertEquals("O", raw.openCloseCode());
+    }
+
+    @Test
+    void parsesPackagePrivateRecordFromAnotherPackageWithoutIllegalAccessException() {
+        PackagePrivateRecord result = parser.parse(LINE_1, 1, PackagePrivateRecord.class);
+
+        assertEquals("315", result.recordCode());
     }
 }

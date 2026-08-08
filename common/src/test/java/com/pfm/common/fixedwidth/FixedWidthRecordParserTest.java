@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FixedWidthRecordParserTest {
 
@@ -16,6 +17,15 @@ class FixedWidthRecordParserTest {
         @FixedWidthField(start = 4, length = 4) String clientType,
         @FixedWidthField(start = 8, length = 4) String clientNumber
     ) {}
+
+    record NonStringComponentRecord(
+        @FixedWidthField(start = 1, length = 3) int recordCode
+    ) {}
+
+    static final class NotARecord {
+        NotARecord() {
+        }
+    }
 
     private final FixedWidthRecordParser parser = new FixedWidthRecordParser();
 
@@ -37,5 +47,23 @@ class FixedWidthRecordParserTest {
 
         assertEquals(7, exception.lineNumber());
         assertEquals(truncated, exception.rawLine());
+    }
+
+    @Test
+    void throwsClearErrorInsteadOfNpeForNonRecordType() {
+        FixedWidthParseException exception = assertThrows(FixedWidthParseException.class,
+            () -> parser.parse(LINE_1, 1, NotARecord.class));
+
+        assertEquals(1, exception.lineNumber());
+        assertTrue(exception.reason().contains("not a record"));
+    }
+
+    @Test
+    void throwsClearErrorForNonStringComponent() {
+        FixedWidthParseException exception = assertThrows(FixedWidthParseException.class,
+            () -> parser.parse(LINE_1, 1, NonStringComponentRecord.class));
+
+        assertEquals(1, exception.lineNumber());
+        assertTrue(exception.reason().contains("recordCode"));
     }
 }

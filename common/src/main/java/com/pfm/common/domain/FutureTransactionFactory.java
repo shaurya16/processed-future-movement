@@ -12,7 +12,12 @@ public class FutureTransactionFactory {
 
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
-    public FutureTransaction from(RawFutureTransaction raw, int lineNumber) {
+    /**
+     * @param rawLine the actual 176-character source line this record was parsed from, used
+     *                verbatim (not a reconstruction from {@code raw}) in any conversion-failure
+     *                {@link FixedWidthParseException} so the error is replayable against the source file.
+     */
+    public FutureTransaction from(RawFutureTransaction raw, int lineNumber, String rawLine) {
         return new FutureTransaction(
                 raw.recordCode(),
                 raw.clientType(),
@@ -23,68 +28,92 @@ public class FutureTransactionFactory {
                 raw.productGroupCode(),
                 raw.exchangeCode(),
                 raw.symbol(),
-                parseDate(raw.expirationDateRaw(), "expirationDate", lineNumber, raw),
+                parseDate(raw.expirationDateRaw(), "expirationDate", lineNumber, rawLine),
                 raw.currencyCode(),
                 raw.movementCode(),
-                parseChar(raw.buySellCode(), "buySellCode", lineNumber, raw),
-                signedLong(raw.quantityLongSign(), raw.quantityLongRaw(), "quantityLong", lineNumber, raw),
-                signedLong(raw.quantityShortSign(), raw.quantityShortRaw(), "quantityShort", lineNumber, raw),
-                scaledDecimal(raw.exchBrokerFeeRaw(), raw.exchBrokerFeeDC(), 2, "exchBrokerFee", lineNumber, raw),
+                parseChar(raw.buySellCode(), "buySellCode", lineNumber, rawLine),
+                signedLong(raw.quantityLongSign(), raw.quantityLongRaw(), "quantityLong", lineNumber, rawLine),
+                signedLong(raw.quantityShortSign(), raw.quantityShortRaw(), "quantityShort", lineNumber, rawLine),
+                scaledDecimal(raw.exchBrokerFeeRaw(), raw.exchBrokerFeeDC(), 2, "exchBrokerFee", lineNumber, rawLine),
                 raw.exchBrokerFeeCurrency(),
-                scaledDecimal(raw.clearingFeeRaw(), raw.clearingFeeDC(), 2, "clearingFee", lineNumber, raw),
+                parseDebitCredit(raw.exchBrokerFeeDC(), "exchBrokerFeeDC", lineNumber, rawLine),
+                scaledDecimal(raw.clearingFeeRaw(), raw.clearingFeeDC(), 2, "clearingFee", lineNumber, rawLine),
                 raw.clearingFeeCurrency(),
-                scaledDecimal(raw.commissionRaw(), raw.commissionDC(), 2, "commission", lineNumber, raw),
+                parseDebitCredit(raw.clearingFeeDC(), "clearingFeeDC", lineNumber, rawLine),
+                scaledDecimal(raw.commissionRaw(), raw.commissionDC(), 2, "commission", lineNumber, rawLine),
                 raw.commissionCurrency(),
-                parseDate(raw.transactionDateRaw(), "transactionDate", lineNumber, raw),
+                parseDebitCredit(raw.commissionDC(), "commissionDC", lineNumber, rawLine),
+                parseDate(raw.transactionDateRaw(), "transactionDate", lineNumber, rawLine),
                 raw.futureReference(),
                 raw.ticketNumber(),
                 raw.externalNumber(),
-                unscaledDecimal(raw.transactionPriceRaw(), 7, "transactionPrice", lineNumber, raw),
+                unscaledDecimal(raw.transactionPriceRaw(), 7, "transactionPrice", lineNumber, rawLine),
                 raw.traderInitials(),
                 raw.oppositeTraderId(),
-                parseChar(raw.openCloseCode(), "openCloseCode", lineNumber, raw)
+                parseChar(raw.openCloseCode(), "openCloseCode", lineNumber, rawLine)
         );
     }
 
-    private long signedLong(String sign, String rawValue, String fieldName, int lineNumber, RawFutureTransaction raw) {
-        long value = parseLong(rawValue, fieldName, lineNumber, raw);
+    private long signedLong(String sign, String rawValue, String fieldName, int lineNumber, String rawLine) {
+        long value = parseLong(rawValue, fieldName, lineNumber, rawLine);
         return "-".equals(sign) ? -value : value;
     }
 
+    /**
+     * Applies the D/C debit/credit indicator to a money field's magnitude.
+     *
+     * <p><b>Assumption flagged for implementation</b> (see
+     * {@code docs/superpowers/specs/2026-08-09-common-fixed-width-parser-design.md}): the
+     * standard accounting reading ({@code D} = debit = negative, {@code C} = credit = positive)
+     * is assumed. Every money field in the 717-line sample data carries a {@code D} indicator;
+     * there is no real {@code C} example to confirm the sign convention from data. Worth a
+     * second look against the File Specification PDF's field description if this assumption
+     * is ever load-bearing.
+     */
     private BigDecimal scaledDecimal(String rawValue, String debitCreditCode, int decimals, String fieldName,
-                                      int lineNumber, RawFutureTransaction raw) {
-        BigDecimal magnitude = unscaledDecimal(rawValue, decimals, fieldName, lineNumber, raw);
-        return "D".equals(debitCreditCode) ? magnitude.negate() : magnitude;
+                                      int lineNumber, String rawLine) {
+        BigDecimal magnitude = unscaledDecimal(rawValue, decimals, fieldName, lineNumber, rawLine);
+        char dc = parseDebitCredit(debitCreditCode, fieldName + "DC", lineNumber, rawLine);
+        return dc == 'D' ? magnitude.negate() : magnitude;
     }
 
     private BigDecimal unscaledDecimal(String rawValue, int decimals, String fieldName, int lineNumber,
-                                        RawFutureTransaction raw) {
-        long digits = parseLong(rawValue, fieldName, lineNumber, raw);
+                                        String rawLine) {
+        long digits = parseLong(rawValue, fieldName, lineNumber, rawLine);
         return BigDecimal.valueOf(digits, decimals);
     }
 
-    private long parseLong(String rawValue, String fieldName, int lineNumber, RawFutureTransaction raw) {
+    private long parseLong(String rawValue, String fieldName, int lineNumber, String rawLine) {
         try {
             return Long.parseLong(rawValue);
         } catch (NumberFormatException e) {
-            throw new FixedWidthParseException(lineNumber, raw.toString(),
+            throw new FixedWidthParseException(lineNumber, rawLine,
                     "Field '" + fieldName + "' is not numeric: '" + rawValue + "'");
         }
     }
 
-    private char parseChar(String rawValue, String fieldName, int lineNumber, RawFutureTransaction raw) {
+    private char parseChar(String rawValue, String fieldName, int lineNumber, String rawLine) {
         if (rawValue.length() != 1) {
-            throw new FixedWidthParseException(lineNumber, raw.toString(),
+            throw new FixedWidthParseException(lineNumber, rawLine,
                     "Field '" + fieldName + "' must be exactly one character: '" + rawValue + "'");
         }
         return rawValue.charAt(0);
     }
 
-    private LocalDate parseDate(String rawValue, String fieldName, int lineNumber, RawFutureTransaction raw) {
+    /** Validates and parses a raw D/C indicator, rejecting anything other than exactly "D" or "C". */
+    private char parseDebitCredit(String rawValue, String fieldName, int lineNumber, String rawLine) {
+        if (!"D".equals(rawValue) && !"C".equals(rawValue)) {
+            throw new FixedWidthParseException(lineNumber, rawLine,
+                    "Field '" + fieldName + "' must be 'D' or 'C': '" + rawValue + "'");
+        }
+        return rawValue.charAt(0);
+    }
+
+    private LocalDate parseDate(String rawValue, String fieldName, int lineNumber, String rawLine) {
         try {
             return LocalDate.parse(rawValue, DATE_FORMAT);
         } catch (DateTimeParseException e) {
-            throw new FixedWidthParseException(lineNumber, raw.toString(),
+            throw new FixedWidthParseException(lineNumber, rawLine,
                     "Field '" + fieldName + "' is not a valid CCYYMMDD date: '" + rawValue + "'");
         }
     }
