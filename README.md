@@ -42,5 +42,10 @@ expected result is visible without running anything.
 
 ## Status
 
-Repo structure and sample output only so far — service implementations are in progress.
+- `common` — done: fixed-width parser + domain model.
+- `ingestion-service` — done: `POST /api/ingest` reads the file and publishes to Kafka
+  (JSON, keyed by client+product, idempotent per file version). See its
+  [README](ingestion-service/README.md) for usage.
+- `processing-service`, `frontend`, `k8s` — not started.
+
 See `CLAUDE.md` for AI-assistance context on this project.
