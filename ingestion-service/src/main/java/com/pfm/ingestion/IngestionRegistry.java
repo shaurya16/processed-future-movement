@@ -1,9 +1,12 @@
 package com.pfm.ingestion;
 
+import org.springframework.stereotype.Component;
+
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
+@Component
 public class IngestionRegistry {
 
     public record CacheOutcome(IngestionResult result, boolean cached) {
