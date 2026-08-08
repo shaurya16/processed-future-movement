@@ -64,9 +64,12 @@ class IngestionControllerTest {
     @Test
     void missingFileReturns404() throws Exception {
         when(ingestionService.ingest(false))
-                .thenThrow(new IngestionFileNotFoundException(Path.of("missing.txt")));
+                .thenThrow(new IngestionFileNotFoundException(Path.of("/some/deep/absolute/missing.txt")));
 
         mockMvc.perform(post("/api/ingest"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("Ingestion file not found"))
+                .andExpect(jsonPath("$.error", org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("/some/deep/absolute/missing.txt"))));
     }
 }

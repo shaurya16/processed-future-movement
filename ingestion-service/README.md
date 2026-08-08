@@ -11,13 +11,30 @@ Design decisions: [docs/superpowers/specs/2026-08-09-ingestion-service-design.md
 
 ## Running locally
 
+Run these from the **repo root**:
+
 ```bash
-docker compose up -d          # starts a local Kafka broker on localhost:9092
-mvn -pl ingestion-service -am spring-boot:run
+docker compose up -d                                          # starts a local Kafka broker on localhost:9092
+mvn -q -DskipTests install                                     # builds & installs `common` (and all modules) to the local repo
+INGESTION_FILE_PATH="$PWD/sample-data/Input.txt" mvn -pl ingestion-service spring-boot:run
 ```
 
-By default it reads `sample-data/Input.txt` (relative to the repo root). Override with
-`INGESTION_FILE_PATH=/path/to/file`.
+Note: don't pass `-am` to the `spring-boot:run` step. `-am` pulls the root aggregator POM
+and `common` into the reactor, and `spring-boot:run` tries to run on every reactor project
+— including pom-packaged ones with no main class — which fails with "Unable to find a
+suitable main class". Running `install` first publishes `common` to the local `.m2` repo,
+so `ingestion-service` can build against it without `-am`.
+
+By default it reads `sample-data/Input.txt`, resolved **relative to
+`ingestion-service`'s working directory** (not the repo root) when run via
+`spring-boot:run` — so the `INGESTION_FILE_PATH` override above (an absolute path) is
+required unless you `cd` into `ingestion-service` first and the file happens to live there.
+
+In a separate terminal, once the service is up:
+
+```bash
+curl -X POST http://localhost:8081/api/ingest
+```
 
 ## API
 
@@ -27,7 +44,3 @@ By default it reads `sample-data/Input.txt` (relative to the repo root). Overrid
   republishing (`cached: true`).
 - `POST /api/ingest?force=true` — bypasses the cache and republishes even if this exact
   file was already ingested.
-
-```bash
-curl -X POST http://localhost:8081/api/ingest
-```

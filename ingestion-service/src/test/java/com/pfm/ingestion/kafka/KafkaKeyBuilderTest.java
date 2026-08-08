@@ -22,6 +22,6 @@ class KafkaKeyBuilderTest {
                 new BigDecimal("9250.0000000"), "", "", 'O'
         );
 
-        assertEquals("CL432100020001|SGXFUNK2010-09-10", KafkaKeyBuilder.buildKey(transaction));
+        assertEquals("CL432100020001|SGXFUNK20100910", KafkaKeyBuilder.buildKey(transaction));
     }
 }

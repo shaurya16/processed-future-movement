@@ -21,6 +21,14 @@ import java.util.concurrent.TimeoutException;
 @Service
 public class IngestionService {
 
+    /**
+     * Bounds worst-case blocking time when the broker is unreachable/degraded: after this
+     * many consecutive Kafka send failures we stop attempting further sends for this batch
+     * rather than blocking up to 10s per remaining record (which for a 717-record file could
+     * hold an HTTP request open for close to two hours).
+     */
+    private static final int MAX_CONSECUTIVE_SEND_FAILURES = 5;
+
     private final FutureTransactionParser parser;
     private final KafkaTemplate<String, FutureTransaction> kafkaTemplate;
     private final IngestionRegistry registry;
@@ -53,8 +61,24 @@ public class IngestionService {
             return registry.forceCompute(fingerprint, () -> runIngestion(path, fingerprint));
         }
 
-        IngestionRegistry.CacheOutcome outcome = registry.getOrCompute(fingerprint, () -> runIngestion(path, fingerprint));
+        IngestionRegistry.CacheOutcome outcome = registry.getOrCompute(
+                fingerprint,
+                () -> runIngestion(path, fingerprint),
+                IngestionService::hasNoKafkaSendFailures);
         return outcome.result().withCached(outcome.cached());
+    }
+
+    /**
+     * A result is only safe to cache (and serve to future non-forced requests without
+     * republishing) when every parsed record actually made it to Kafka. Parse errors are
+     * deterministic for a given file and caching them is fine; Kafka send failures (tagged
+     * with lineNumber == -1, see runIngestion below) are transient infrastructure failures,
+     * and caching a batch that has known un-retried send failures would mean a financial
+     * pipeline silently treats a partially-ingested file as fully ingested forever. See
+     * finding #5 of the final-review fix wave for the full reasoning.
+     */
+    private static boolean hasNoKafkaSendFailures(IngestionResult result) {
+        return result.errors().stream().noneMatch(error -> error.lineNumber() == -1);
     }
 
     private IngestionResult runIngestion(Path path, String fingerprint) {
@@ -68,18 +92,36 @@ public class IngestionService {
         ParseResult parseResult = parser.parseAll(lines);
 
         List<ParseError> sendFailures = new ArrayList<>();
+        List<FutureTransaction> records = parseResult.records();
         int published = 0;
-        for (FutureTransaction transaction : parseResult.records()) {
+        int consecutiveFailures = 0;
+        int attempted = 0;
+        for (FutureTransaction transaction : records) {
+            attempted++;
             String key = KafkaKeyBuilder.buildKey(transaction);
             try {
                 kafkaTemplate.send(properties.topic(), key, transaction).get(10, TimeUnit.SECONDS);
                 published++;
+                consecutiveFailures = 0;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 sendFailures.add(new ParseError(-1, key, "Kafka send interrupted: " + e.getMessage()));
+                consecutiveFailures++;
             } catch (ExecutionException | TimeoutException e) {
                 sendFailures.add(new ParseError(-1, key, "Kafka send failed: " + e.getMessage()));
+                consecutiveFailures++;
             }
+            if (consecutiveFailures >= MAX_CONSECUTIVE_SEND_FAILURES) {
+                break;
+            }
+        }
+
+        if (attempted < records.size()) {
+            int notAttempted = records.size() - attempted;
+            sendFailures.add(new ParseError(-1, "n/a",
+                    "Aborted after " + MAX_CONSECUTIVE_SEND_FAILURES
+                            + " consecutive Kafka send failures; " + notAttempted
+                            + " record(s) not attempted"));
         }
 
         List<ParseError> allErrors = new ArrayList<>(parseResult.errors());

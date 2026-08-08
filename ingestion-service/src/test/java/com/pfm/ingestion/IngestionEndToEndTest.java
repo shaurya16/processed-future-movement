@@ -1,5 +1,9 @@
 package com.pfm.ingestion;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.pfm.common.domain.FutureTransaction;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -19,11 +23,13 @@ import org.testcontainers.kafka.KafkaContainer;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -71,7 +77,44 @@ class IngestionEndToEndTest {
 
         List<ConsumerRecord<String, String>> records = consumeAll(1434);
         assertEquals(1434, records.size());
-        assertTrue(records.stream().allMatch(r -> r.key() != null && r.key().contains("|")));
+
+        // (a) Wire-contract check on the key: Client_Information + "|" + Product_Information
+        // (see docs/file-spec.md). Real symbols can contain punctuation (e.g. "NK."), so we
+        // don't over-constrain the charset — instead we assert the exact structural defect
+        // from finding #2 is gone: the expiration date must not be a dashed ISO
+        // LocalDate.toString() (e.g. "2010-09-10"), it must be raw CCYYMMDD (e.g. "20100910").
+        Pattern productInfoPattern = Pattern.compile("^[A-Z0-9.]*\\d{8}$");
+        assertTrue(records.stream().allMatch(r -> {
+            if (r.key() == null) {
+                return false;
+            }
+            String[] parts = r.key().split("\\|", -1);
+            return parts.length == 2 && !parts[0].isEmpty() && productInfoPattern.matcher(parts[1]).matches();
+        }), "every record key must be Client_Information|Product_Information with the expiration "
+                + "date as raw CCYYMMDD (no dashes), e.g. CL432100020001|SGXFUNK20100910");
+
+        // (b) Wire-contract check on the value: deserialize the JSON payload back into a
+        // FutureTransaction using a JavaTimeModule-aware ObjectMapper (mirroring what a real
+        // consumer would need) and confirm it round-trips a recognizable record, including
+        // that LocalDate fields serialized as ISO-8601 strings, not timestamp arrays. This is
+        // what would have caught finding #1 (a bare ObjectMapper defaults to
+        // WRITE_DATES_AS_TIMESTAMPS, which serializes LocalDate as e.g. [2010,9,10]).
+        ObjectMapper valueMapper = new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        ConsumerRecord<String, String> sample = records.get(0);
+        assertTrue(sample.value().contains("\"expirationDate\":\"20"),
+                "expected expirationDate to be serialized as an ISO-8601 string, got: " + sample.value());
+        FutureTransaction transaction;
+        try {
+            transaction = valueMapper.readValue(sample.value(), FutureTransaction.class);
+        } catch (Exception e) {
+            throw new AssertionError("failed to deserialize Kafka value as FutureTransaction: " + sample.value(), e);
+        }
+        assertNotNull(transaction.expirationDate());
+        assertTrue(transaction.expirationDate().isAfter(LocalDate.of(1900, 1, 1)),
+                "expirationDate should have round-tripped to a real LocalDate, got: " + transaction.expirationDate());
+        assertNotNull(transaction.symbol());
     }
 
     private IngestionResult postIngest(String querySuffix) {
