@@ -635,6 +635,7 @@ import com.pfm.common.fixedwidth.FixedWidthParseException;
 import com.pfm.common.fixedwidth.FixedWidthRecordParser;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.RecordComponent;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
@@ -696,7 +697,7 @@ class FutureTransactionFactoryTest {
     @Test
     void negativeQuantitySignProducesNegativeValue() {
         RawFutureTransaction base = recordParser.parse(LINE_1, 1, RawFutureTransaction.class);
-        RawFutureTransaction withNegativeLong = withQuantityLongSign(base, "-");
+        RawFutureTransaction withNegativeLong = withField(base, "quantityLongSign", "-");
 
         FutureTransaction result = factory.from(withNegativeLong, 1);
 
@@ -706,7 +707,7 @@ class FutureTransactionFactoryTest {
     @Test
     void plusQuantitySignProducesPositiveValue() {
         RawFutureTransaction base = recordParser.parse(LINE_1, 1, RawFutureTransaction.class);
-        RawFutureTransaction withPlusLong = withQuantityLongSign(base, "+");
+        RawFutureTransaction withPlusLong = withField(base, "quantityLongSign", "+");
 
         FutureTransaction result = factory.from(withPlusLong, 1);
 
@@ -716,7 +717,7 @@ class FutureTransactionFactoryTest {
     @Test
     void creditIndicatorProducesPositiveAmount() {
         RawFutureTransaction base = recordParser.parse(LINE_1, 1, RawFutureTransaction.class);
-        RawFutureTransaction withCredit = withExchBrokerFeeDC(base, "C");
+        RawFutureTransaction withCredit = withField(base, "exchBrokerFeeDC", "C");
 
         FutureTransaction result = factory.from(withCredit, 1);
 
@@ -726,7 +727,7 @@ class FutureTransactionFactoryTest {
     @Test
     void nonNumericQuantityThrows() {
         RawFutureTransaction base = recordParser.parse(LINE_1, 1, RawFutureTransaction.class);
-        RawFutureTransaction withBadQuantity = withQuantityLongRaw(base, "AAAAAAAAAA");
+        RawFutureTransaction withBadQuantity = withField(base, "quantityLongRaw", "AAAAAAAAAA");
 
         FixedWidthParseException exception = assertThrows(FixedWidthParseException.class,
             () -> factory.from(withBadQuantity, 1));
@@ -737,65 +738,32 @@ class FutureTransactionFactoryTest {
     @Test
     void invalidDateThrows() {
         RawFutureTransaction base = recordParser.parse(LINE_1, 1, RawFutureTransaction.class);
-        RawFutureTransaction withBadDate = withExpirationDateRaw(base, "20109999");
+        RawFutureTransaction withBadDate = withField(base, "expirationDateRaw", "20109999");
 
         assertThrows(FixedWidthParseException.class, () -> factory.from(withBadDate, 1));
     }
 
-    private RawFutureTransaction withQuantityLongSign(RawFutureTransaction base, String sign) {
-        return new RawFutureTransaction(
-            base.recordCode(), base.clientType(), base.clientNumber(), base.accountNumber(),
-            base.subaccountNumber(), base.oppositePartyCode(), base.productGroupCode(),
-            base.exchangeCode(), base.symbol(), base.expirationDateRaw(), base.currencyCode(),
-            base.movementCode(), base.buySellCode(), sign, base.quantityLongRaw(),
-            base.quantityShortSign(), base.quantityShortRaw(), base.exchBrokerFeeRaw(), base.exchBrokerFeeDC(),
-            base.exchBrokerFeeCurrency(), base.clearingFeeRaw(), base.clearingFeeDC(), base.clearingFeeCurrency(),
-            base.commissionRaw(), base.commissionDC(), base.commissionCurrency(), base.transactionDateRaw(),
-            base.futureReference(), base.ticketNumber(), base.externalNumber(), base.transactionPriceRaw(),
-            base.traderInitials(), base.oppositeTraderId(), base.openCloseCode()
-        );
-    }
-
-    private RawFutureTransaction withQuantityLongRaw(RawFutureTransaction base, String rawDigits) {
-        return new RawFutureTransaction(
-            base.recordCode(), base.clientType(), base.clientNumber(), base.accountNumber(),
-            base.subaccountNumber(), base.oppositePartyCode(), base.productGroupCode(),
-            base.exchangeCode(), base.symbol(), base.expirationDateRaw(), base.currencyCode(),
-            base.movementCode(), base.buySellCode(), base.quantityLongSign(), rawDigits,
-            base.quantityShortSign(), base.quantityShortRaw(), base.exchBrokerFeeRaw(), base.exchBrokerFeeDC(),
-            base.exchBrokerFeeCurrency(), base.clearingFeeRaw(), base.clearingFeeDC(), base.clearingFeeCurrency(),
-            base.commissionRaw(), base.commissionDC(), base.commissionCurrency(), base.transactionDateRaw(),
-            base.futureReference(), base.ticketNumber(), base.externalNumber(), base.transactionPriceRaw(),
-            base.traderInitials(), base.oppositeTraderId(), base.openCloseCode()
-        );
-    }
-
-    private RawFutureTransaction withExchBrokerFeeDC(RawFutureTransaction base, String dc) {
-        return new RawFutureTransaction(
-            base.recordCode(), base.clientType(), base.clientNumber(), base.accountNumber(),
-            base.subaccountNumber(), base.oppositePartyCode(), base.productGroupCode(),
-            base.exchangeCode(), base.symbol(), base.expirationDateRaw(), base.currencyCode(),
-            base.movementCode(), base.buySellCode(), base.quantityLongSign(), base.quantityLongRaw(),
-            base.quantityShortSign(), base.quantityShortRaw(), base.exchBrokerFeeRaw(), dc,
-            base.exchBrokerFeeCurrency(), base.clearingFeeRaw(), base.clearingFeeDC(), base.clearingFeeCurrency(),
-            base.commissionRaw(), base.commissionDC(), base.commissionCurrency(), base.transactionDateRaw(),
-            base.futureReference(), base.ticketNumber(), base.externalNumber(), base.transactionPriceRaw(),
-            base.traderInitials(), base.oppositeTraderId(), base.openCloseCode()
-        );
-    }
-
-    private RawFutureTransaction withExpirationDateRaw(RawFutureTransaction base, String rawDate) {
-        return new RawFutureTransaction(
-            base.recordCode(), base.clientType(), base.clientNumber(), base.accountNumber(),
-            base.subaccountNumber(), base.oppositePartyCode(), base.productGroupCode(),
-            base.exchangeCode(), base.symbol(), rawDate, base.currencyCode(),
-            base.movementCode(), base.buySellCode(), base.quantityLongSign(), base.quantityLongRaw(),
-            base.quantityShortSign(), base.quantityShortRaw(), base.exchBrokerFeeRaw(), base.exchBrokerFeeDC(),
-            base.exchBrokerFeeCurrency(), base.clearingFeeRaw(), base.clearingFeeDC(), base.clearingFeeCurrency(),
-            base.commissionRaw(), base.commissionDC(), base.commissionCurrency(), base.transactionDateRaw(),
-            base.futureReference(), base.ticketNumber(), base.externalNumber(), base.transactionPriceRaw(),
-            base.traderInitials(), base.oppositeTraderId(), base.openCloseCode()
-        );
+    /**
+     * Copies {@code base}, substituting the named record component with {@code newValue}.
+     * Generic over any field so individual tests don't each hand-roll a 33-argument
+     * reconstruction of RawFutureTransaction.
+     */
+    private RawFutureTransaction withField(RawFutureTransaction base, String fieldName, String newValue) {
+        RecordComponent[] components = RawFutureTransaction.class.getRecordComponents();
+        Class<?>[] paramTypes = new Class<?>[components.length];
+        Object[] args = new Object[components.length];
+        try {
+            for (int i = 0; i < components.length; i++) {
+                RecordComponent component = components[i];
+                paramTypes[i] = component.getType();
+                args[i] = component.getName().equals(fieldName)
+                        ? newValue
+                        : component.getAccessor().invoke(base);
+            }
+            return RawFutureTransaction.class.getDeclaredConstructor(paramTypes).newInstance(args);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
     }
 }
 ```
