@@ -18,6 +18,34 @@
 
   <properties>
     <java.version>21</java.version>
+
+    <!--
+      Docker API version forwarded to Testcontainers' bundled docker-java client for
+      IngestionEndToEndTest, via the -Dapi.version system property (see surefire config
+      below). docker-java has no environment variable mapping for this setting: it can
+      only be set via the "api.version" system property or a docker-java.properties
+      classpath resource (confirmed by decompiling the shaded classes inside
+      testcontainers-1.21.3.jar).
+
+      Why this exists: whenever the resolved API version is left unset, Testcontainers
+      1.21.3 falls back to a hardcoded RemoteApiVersion.VERSION_1_32
+      (org.testcontainers.dockerclient.DockerClientProviderStrategy). Some current Docker
+      Desktop builds report MinAPIVersion 1.40, well above that hardcoded fallback, and
+      respond to any request below their floor with a stubbed, near-empty 400 response,
+      which Testcontainers misreads as "no Docker environment found," even though `docker
+      info`/`docker ps` work fine from a shell. 1.51 was the version confirmed working
+      against Docker Desktop 4.85 (client/engine API 1.55) at the time this was added.
+
+      This value has zero authority over what your Docker Engine actually supports, so
+      it is a default, not a mandate: override it per environment with
+      `-Dtestcontainers.docker.api.version=(version supported by your engine)`, or clear
+      it entirely with `-Dtestcontainers.docker.api.version=` to fall back to
+      Testcontainers' own, unpinned resolution; for example on an older Docker Engine
+      whose MinAPIVersion is below 1.32, Testcontainers' own default already works and no
+      override is needed at all. If you hit "Could not find a valid Docker environment"
+      despite Docker clearly running, this is the first place to look.
+    -->
+    <testcontainers.docker.api.version>1.51</testcontainers.docker.api.version>
   </properties>
 
   <dependencies>
@@ -70,6 +98,20 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!--
+            See the testcontainers.docker.api.version property comment above: this forwards
+            it to docker-java's "api.version" system property in the forked test JVM, with
+            a default that keeps working out of the box but can be overridden per-machine.
+          -->
+          <systemPropertyVariables>
+            <api.version>${testcontainers.docker.api.version}</api.version>
+          </systemPropertyVariables>
+        </configuration>
       </plugin>
     </plugins>
   </build>
