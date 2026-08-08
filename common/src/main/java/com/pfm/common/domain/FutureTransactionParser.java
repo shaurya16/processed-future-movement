@@ -1,0 +1,41 @@
+package com.pfm.common.domain;
+
+import com.pfm.common.fixedwidth.FixedWidthParseException;
+import com.pfm.common.fixedwidth.FixedWidthRecordParser;
+import com.pfm.common.fixedwidth.ParseError;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Domain-specific facade composing {@link FixedWidthRecordParser} and
+ * {@link FutureTransactionFactory}. {@link #parse} is strict (throws on a bad line);
+ * {@link #parseAll} is resilient (skip-and-collect), which is what a file-reading
+ * caller like ingestion-service is expected to use.
+ */
+public class FutureTransactionParser {
+
+    private final FixedWidthRecordParser recordParser = new FixedWidthRecordParser();
+    private final FutureTransactionFactory factory = new FutureTransactionFactory();
+
+    public FutureTransaction parse(String line, int lineNumber) {
+        RawFutureTransaction raw = recordParser.parse(line, lineNumber, RawFutureTransaction.class);
+        return factory.from(raw, lineNumber);
+    }
+
+    public ParseResult parseAll(List<String> lines) {
+        List<FutureTransaction> records = new ArrayList<>();
+        List<ParseError> errors = new ArrayList<>();
+
+        for (int i = 0; i < lines.size(); i++) {
+            int lineNumber = i + 1;
+            try {
+                records.add(parse(lines.get(i), lineNumber));
+            } catch (FixedWidthParseException e) {
+                errors.add(new ParseError(e.lineNumber(), e.rawLine(), e.getMessage()));
+            }
+        }
+
+        return new ParseResult(records, errors);
+    }
+}
