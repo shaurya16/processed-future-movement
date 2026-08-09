@@ -32,7 +32,7 @@ Full design rationale: [docs/superpowers/specs/2026-08-09-processing-service-des
 - Test: `common/src/test/java/com/pfm/common/domain/FutureTransactionParserTest.java` (existing file, updated in place)
 
 **Interfaces:**
-- Produces: `record ParsedRecord(int lineNumber, FutureTransaction transaction)`; `ParseResult.records()` now returns `List<ParsedRecord>` instead of `List<FutureTransaction>`. Everything downstream (`ingestion-service`'s `IngestionService`, Task 4 of this plan) consumes this new shape.
+- Produces: `record ParsedRecord(int lineNumber, FutureTransaction transaction)`; `ParseResult.records()` now returns `List<ParsedRecord>` instead of `List<FutureTransaction>`. Everything downstream (`ingestion-service`'s `IngestionService`, Task 3 of this plan) consumes this new shape.
 
 A successfully-parsed record's original line number is currently discarded by `parseAll` — needed later so `ingestion-service` can compute `transactionId = sha256Hex(contentHash + ":" + lineNumber)` per record.
 
