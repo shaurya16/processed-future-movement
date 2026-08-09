@@ -8,6 +8,7 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -115,6 +116,22 @@ class IngestionEndToEndTest {
         assertTrue(transaction.expirationDate().isAfter(LocalDate.of(1900, 1, 1)),
                 "expirationDate should have round-tripped to a real LocalDate, got: " + transaction.expirationDate());
         assertNotNull(transaction.symbol());
+
+        // (c) Wire-contract check on headers: every record carries a transactionId header
+        // that looks like a SHA-256 hex digest (64 lowercase hex chars) — the mechanism
+        // that lets processing-service dedupe a retried/forced re-publish of this exact
+        // file without double-counting. Exact values are covered precisely at the unit
+        // level (IngestionServiceTest, ContentHashTest, TransactionIdBuilderTest); this is
+        // a structural check that the header actually reaches a real broker.
+        Pattern sha256HexPattern = Pattern.compile("^[0-9a-f]{64}$");
+        assertTrue(records.stream().allMatch(r -> {
+            Header header = r.headers().lastHeader("transactionId");
+            if (header == null || header.value() == null) {
+                return false;
+            }
+            String value = new String(header.value(), java.nio.charset.StandardCharsets.UTF_8);
+            return sha256HexPattern.matcher(value).matches();
+        }), "every record must carry a transactionId header that is a 64-char lowercase hex SHA-256 digest");
     }
 
     private IngestionResult postIngest(String querySuffix) {
