@@ -25,8 +25,10 @@ class FutureTransactionParserTest {
 
         assertEquals(2, result.records().size());
         assertTrue(result.errors().isEmpty());
-        assertEquals("0002", result.records().get(0).accountNumber());
-        assertEquals("0003", result.records().get(1).accountNumber());
+        assertEquals("0002", result.records().get(0).transaction().accountNumber());
+        assertEquals(1, result.records().get(0).lineNumber());
+        assertEquals("0003", result.records().get(1).transaction().accountNumber());
+        assertEquals(2, result.records().get(1).lineNumber());
     }
 
     @Test
@@ -34,7 +36,8 @@ class FutureTransactionParserTest {
         ParseResult result = parser.parseAll(List.of(LINE_1, TRUNCATED_LINE));
 
         assertEquals(1, result.records().size());
-        assertEquals("0002", result.records().get(0).accountNumber());
+        assertEquals("0002", result.records().get(0).transaction().accountNumber());
+        assertEquals(1, result.records().get(0).lineNumber());
         assertEquals(1, result.errors().size());
         assertEquals(2, result.errors().get(0).lineNumber());
         assertEquals(TRUNCATED_LINE, result.errors().get(0).rawLine());
@@ -45,8 +48,13 @@ class FutureTransactionParserTest {
         ParseResult result = parser.parseAll(List.of(LINE_1, TRUNCATED_LINE, LINE_13));
 
         assertEquals(2, result.records().size());
-        assertEquals("0002", result.records().get(0).accountNumber());
-        assertEquals("0003", result.records().get(1).accountNumber());
+        assertEquals("0002", result.records().get(0).transaction().accountNumber());
+        assertEquals(1, result.records().get(0).lineNumber());
+        assertEquals("0003", result.records().get(1).transaction().accountNumber());
+        // LINE_13 is the 3rd input line, so its ParsedRecord must carry lineNumber 3,
+        // not 2 (the index it would have in a flat List<FutureTransaction>) — this is
+        // exactly the gap ParsedRecord exists to close.
+        assertEquals(3, result.records().get(1).lineNumber());
         assertEquals(1, result.errors().size());
         assertEquals(2, result.errors().get(0).lineNumber());
     }

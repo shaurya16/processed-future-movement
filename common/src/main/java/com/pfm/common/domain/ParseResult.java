@@ -4,5 +4,5 @@ import com.pfm.common.fixedwidth.ParseError;
 
 import java.util.List;
 
-public record ParseResult(List<FutureTransaction> records, List<ParseError> errors) {
+public record ParseResult(List<ParsedRecord> records, List<ParseError> errors) {
 }
