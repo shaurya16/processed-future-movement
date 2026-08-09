@@ -13,7 +13,8 @@ class TransactionSerdeTest {
 
     @Test
     void roundTripsAFutureTransactionThroughSerializeAndDeserialize() {
-        Serde<FutureTransaction> serde = TransactionSerde.instance();
+        Serde<FutureTransaction> producerSide = TransactionSerde.instance();
+        Serde<FutureTransaction> consumerSide = TransactionSerde.instance();
         FutureTransaction original = new FutureTransaction(
                 "315", "CL", "4321", "0002", "0001", "SGXDC", "FU", "SGX", "NK",
                 LocalDate.of(2010, 9, 10), "JPY", "01", 'B',
@@ -24,8 +25,8 @@ class TransactionSerdeTest {
                 LocalDate.of(2010, 8, 20), "001238", "0", "688032",
                 BigDecimal.valueOf(925, 5), "TRDR12", "OPP0001", 'O');
 
-        byte[] bytes = serde.serializer().serialize("future-transactions", original);
-        FutureTransaction roundTripped = serde.deserializer().deserialize("future-transactions", bytes);
+        byte[] bytes = producerSide.serializer().serialize("future-transactions", original);
+        FutureTransaction roundTripped = consumerSide.deserializer().deserialize("future-transactions", bytes);
 
         assertEquals(original, roundTripped);
     }
