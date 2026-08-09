@@ -3,13 +3,17 @@ package com.pfm.ingestion;
 import com.pfm.common.domain.FutureTransaction;
 import com.pfm.common.domain.FutureTransactionParser;
 import com.pfm.common.domain.ParseResult;
+import com.pfm.common.domain.ParsedRecord;
 import com.pfm.common.fixedwidth.ParseError;
 import com.pfm.ingestion.kafka.KafkaKeyBuilder;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.header.internals.RecordHeader;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -83,8 +87,10 @@ public class IngestionService {
 
     private IngestionResult runIngestion(Path path, String fingerprint) {
         List<String> lines;
+        String contentHash;
         try {
             lines = Files.readAllLines(path);
+            contentHash = ContentHash.compute(path);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -92,15 +98,20 @@ public class IngestionService {
         ParseResult parseResult = parser.parseAll(lines);
 
         List<ParseError> sendFailures = new ArrayList<>();
-        List<FutureTransaction> records = parseResult.records();
+        List<ParsedRecord> records = parseResult.records();
         int published = 0;
         int consecutiveFailures = 0;
         int attempted = 0;
-        for (FutureTransaction transaction : records) {
+        for (ParsedRecord parsedRecord : records) {
             attempted++;
+            FutureTransaction transaction = parsedRecord.transaction();
             String key = KafkaKeyBuilder.buildKey(transaction);
+            String transactionId = TransactionIdBuilder.build(contentHash, parsedRecord.lineNumber());
+            ProducerRecord<String, FutureTransaction> producerRecord = new ProducerRecord<>(
+                    properties.topic(), null, key, transaction,
+                    List.of(new RecordHeader("transactionId", transactionId.getBytes(StandardCharsets.UTF_8))));
             try {
-                kafkaTemplate.send(properties.topic(), key, transaction).get(10, TimeUnit.SECONDS);
+                kafkaTemplate.send(producerRecord).get(10, TimeUnit.SECONDS);
                 published++;
                 consecutiveFailures = 0;
             } catch (InterruptedException e) {
