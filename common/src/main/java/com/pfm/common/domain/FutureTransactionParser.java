@@ -24,13 +24,13 @@ public class FutureTransactionParser {
     }
 
     public ParseResult parseAll(List<String> lines) {
-        List<FutureTransaction> records = new ArrayList<>();
+        List<ParsedRecord> records = new ArrayList<>();
         List<ParseError> errors = new ArrayList<>();
 
         for (int i = 0; i < lines.size(); i++) {
             int lineNumber = i + 1;
             try {
-                records.add(parse(lines.get(i), lineNumber));
+                records.add(new ParsedRecord(lineNumber, parse(lines.get(i), lineNumber)));
             } catch (FixedWidthParseException e) {
                 errors.add(new ParseError(e.lineNumber(), e.rawLine(), e.reason()));
             }
