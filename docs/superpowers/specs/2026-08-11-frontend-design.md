@@ -157,13 +157,17 @@ component. Calls `reportService.load()` on init. Renders based on `status`:
 ## Testing
 
 Unit tests only (Vitest, Angular CLI 21's current default test runner —
-`HttpTestingController`, `TestBed`, and `fakeAsync`/`tick` are runner-agnostic
-`@angular/core/testing` utilities and behave identically; only assertion/spy syntax
-differs from Karma/Jasmine, e.g. `vi.fn()` instead of `jasmine.createSpy()`):
+`HttpTestingController` and `TestBed` are runner-agnostic `@angular/core/testing`
+utilities and behave identically under Vitest. Timer advancement for the retry loop
+uses Vitest's native `vi.useFakeTimers()` / `vi.advanceTimersByTimeAsync()` rather than
+Angular's `fakeAsync`/`tick`, confirmed while scoping the plan: `fakeAsync` requires
+`zone.js/testing`, which isn't present in a fresh `ng new` workspace on Angular CLI 21
+by default, whereas Vitest's own fake timers work with no extra setup):
 
 - **`ReportService`**:
   - `503` → `503` → `200` sequence ends in `status = 'ready'` with the correct
-    `entries`, verified with `fakeAsync`/`tick` advancing past the retry timer.
+    `entries`, verified with `vi.useFakeTimers()` / `vi.advanceTimersByTimeAsync()`
+    advancing past the retry timer.
   - `200` with `[]` yields `status = 'ready'` with `entries() = []` — explicitly
     asserted as *not* `loading`.
   - Network/500 error yields `status = 'error'` with a non-empty `errorMessage`, and
