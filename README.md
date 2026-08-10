@@ -44,8 +44,13 @@ expected result is visible without running anything.
 
 - `common` — done: fixed-width parser + domain model.
 - `ingestion-service` — done: `POST /api/ingest` reads the file and publishes to Kafka
-  (JSON, keyed by client+product, idempotent per file version). See its
+  (JSON, keyed by client+product, idempotent per file version, each record carrying a
+  content-derived `transactionId` header for downstream dedup). See its
   [README](ingestion-service/README.md) for usage.
-- `processing-service`, `frontend`, `k8s` — not started.
+- `processing-service` — done: Kafka Streams consumer dedupes on `transactionId` and
+  maintains a running per-(client, product) net-quantity aggregate, exposed via
+  `GET /api/report` and `GET /api/report/csv`. See its
+  [README](processing-service/README.md) for usage.
+- `frontend`, `k8s` — not started.
 
 See `CLAUDE.md` for AI-assistance context on this project.
