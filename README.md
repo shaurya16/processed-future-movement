@@ -51,6 +51,9 @@ expected result is visible without running anything.
   maintains a running per-(client, product) net-quantity aggregate, exposed via
   `GET /api/report` and `GET /api/report/csv`. See its
   [README](processing-service/README.md) for usage.
-- `frontend`, `k8s` — not started.
+- `frontend` — done: Angular UI displays the daily summary report and downloads it as
+  CSV, distinguishing "store not ready" (`503`, auto-retries) from "zero rows so far"
+  (`200` with `[]`). See its [README](frontend/README.md) for usage.
+- `k8s` — not started.
 
 See `CLAUDE.md` for AI-assistance context on this project.
