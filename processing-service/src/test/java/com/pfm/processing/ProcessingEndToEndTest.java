@@ -93,16 +93,23 @@ class ProcessingEndToEndTest {
         long deadline = System.currentTimeMillis() + 30_000;
         ResponseEntity<ReportEntry[]> lastResponse = null;
         while (System.currentTimeMillis() < deadline) {
-            ResponseEntity<ReportEntry[]> response = restTemplate.getForEntity("/api/report", ReportEntry[].class);
-            lastResponse = response;
-            if (response.getStatusCode().value() == 200 && response.getBody() != null) {
-                for (ReportEntry entry : response.getBody()) {
-                    if (entry.clientInformation().equals(parts[0])
-                            && entry.productInformation().equals(parts[1])
-                            && entry.netQuantity() == expectedNetQuantity) {
-                        return;
+            try {
+                ResponseEntity<ReportEntry[]> response = restTemplate.getForEntity("/api/report", ReportEntry[].class);
+                lastResponse = response;
+                if (response.getStatusCode().value() == 200 && response.getBody() != null) {
+                    for (ReportEntry entry : response.getBody()) {
+                        if (entry.clientInformation().equals(parts[0])
+                                && entry.productInformation().equals(parts[1])
+                                && entry.netQuantity() == expectedNetQuantity) {
+                            return;
+                        }
                     }
                 }
+            } catch (org.springframework.web.client.RestClientException e) {
+                // Kafka Streams may not be RUNNING yet: ReportController returns 503 with a
+                // JSON error object in that case, and Jackson throws trying to deserialize
+                // that object as ReportEntry[] before status-code handling ever runs. Treat
+                // any such failure as "not ready yet" and keep polling.
             }
             try {
                 Thread.sleep(500);
