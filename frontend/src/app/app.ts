@@ -1,11 +1,10 @@
-import { Component, signal } from '@angular/core';
+import { Component } from '@angular/core';
+import { Report } from './report/report';
 
 @Component({
   selector: 'app-root',
-  imports: [],
+  imports: [Report],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
-export class App {
-  protected readonly title = signal('frontend');
-}
+export class App {}
