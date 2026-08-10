@@ -1,0 +1,100 @@
+package com.pfm.processing;
+
+import com.pfm.ingestion.IngestionResult;
+import com.pfm.ingestion.IngestionServiceApplication;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.KafkaContainer;
+
+import java.net.URISyntaxException;
+import java.nio.file.Path;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
+
+@Testcontainers
+class FullPipelineGoldenTest {
+
+    private static final String EXPECTED_CSV =
+            "Client_Information,Product_Information,Total_Transaction_Amount\n"
+                    + "CL123400020001,SGXFUNK20100910,-52\n"
+                    + "CL123400030001,CMEFUN120100910,285\n"
+                    + "CL123400030001,CMEFUNK.20100910,-215\n"
+                    + "CL432100020001,SGXFUNK20100910,46\n"
+                    + "CL432100030001,CMEFUN120100910,-79\n";
+
+    @Container
+    static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.9.2");
+
+    private ConfigurableApplicationContext ingestionContext;
+    private ConfigurableApplicationContext processingContext;
+
+    @AfterEach
+    void tearDown() {
+        if (processingContext != null) {
+            processingContext.close();
+        }
+        if (ingestionContext != null) {
+            ingestionContext.close();
+        }
+    }
+
+    @Test
+    void fullPipelineProducesTheExpectedDailySummary() throws URISyntaxException {
+        String sampleFilePath = Path.of(getClass().getClassLoader().getResource("Input.txt").toURI())
+                .toAbsolutePath()
+                .toString();
+
+        ingestionContext = new SpringApplicationBuilder(IngestionServiceApplication.class)
+                .properties(
+                        "server.port=18081",
+                        "spring.kafka.bootstrap-servers=" + kafka.getBootstrapServers(),
+                        "ingestion.file-path=" + sampleFilePath,
+                        "ingestion.topic=future-transactions")
+                .run();
+
+        processingContext = new SpringApplicationBuilder(ProcessingServiceApplication.class)
+                .properties(
+                        "server.port=18082",
+                        "spring.kafka.bootstrap-servers=" + kafka.getBootstrapServers(),
+                        "spring.kafka.streams.application-id=processing-service-golden-test",
+                        "processing.topic=future-transactions")
+                .run();
+
+        RestTemplate rest = new RestTemplate();
+        IngestionResult ingestResult = rest.postForObject(
+                "http://localhost:18081/api/ingest", null, IngestionResult.class);
+        assertEquals(717, ingestResult.published());
+
+        String csv = awaitFullReportCsv(rest);
+        assertEquals(EXPECTED_CSV, csv);
+    }
+
+    private String awaitFullReportCsv(RestTemplate rest) {
+        long deadline = System.currentTimeMillis() + 60_000;
+        String lastBody = null;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                lastBody = rest.getForObject("http://localhost:18082/api/report/csv", String.class);
+                if (lastBody != null && lastBody.lines().count() == 6) {
+                    return lastBody;
+                }
+            } catch (RestClientException ignored) {
+                // processing-service's Kafka Streams app may not have finished starting yet.
+            }
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        fail("processing-service did not produce the expected 6-line report within 60s; last body: " + lastBody);
+        return null;
+    }
+}
