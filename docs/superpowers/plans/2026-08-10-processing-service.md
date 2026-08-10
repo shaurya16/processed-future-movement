@@ -2317,10 +2317,24 @@ class FullPipelineGoldenTest {
         if (ingestionContext != null) {
             ingestionContext.close();
         }
+        System.clearProperty("spring.config.name");
     }
 
     @Test
     void fullPipelineProducesTheExpectedDailySummary() throws URISyntaxException {
+        // ingestion-service and processing-service both ship an application.yml at the
+        // identical classpath location (classpath:/application.yml). Booting both as real
+        // apps in this one JVM puts ingestion-service's jar (a test-scope dependency) and
+        // processing-service's own target/classes on the same classpath at once; Spring's
+        // classpath resolution can only see one application.yml, and Surefire's classpath
+        // ordering means processing-service's own copy wins for BOTH contexts -- silently
+        // misconfiguring ingestionContext with the wrong port/app name/topic. Suppressing
+        // default config-file lookup entirely (a System property, seen by Spring Boot's
+        // config-data loading before either context boots) and supplying every needed
+        // property explicitly via .properties(...) sidesteps this for both contexts,
+        // deterministically, without depending on classpath ordering at all.
+        System.setProperty("spring.config.name", "full-pipeline-golden-test-disable-default-config");
+
         String sampleFilePath = Path.of(getClass().getClassLoader().getResource("Input.txt").toURI())
                 .toAbsolutePath()
                 .toString();
