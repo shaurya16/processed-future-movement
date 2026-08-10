@@ -156,7 +156,10 @@ component. Calls `reportService.load()` on init. Renders based on `status`:
 
 ## Testing
 
-Unit tests only (Karma/Jasmine, Angular CLI default, `HttpTestingController`):
+Unit tests only (Vitest, Angular CLI 21's current default test runner —
+`HttpTestingController`, `TestBed`, and `fakeAsync`/`tick` are runner-agnostic
+`@angular/core/testing` utilities and behave identically; only assertion/spy syntax
+differs from Karma/Jasmine, e.g. `vi.fn()` instead of `jasmine.createSpy()`):
 
 - **`ReportService`**:
   - `503` → `503` → `200` sequence ends in `status = 'ready'` with the correct
