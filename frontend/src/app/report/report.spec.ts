@@ -10,11 +10,13 @@ function makeStubService(overrides: {
   status: 'loading' | 'ready' | 'error';
   entries?: ReportEntry[];
   errorMessage?: string | null;
+  retryCount?: number;
 }) {
   return {
     status: signal(overrides.status),
     entries: signal(overrides.entries ?? []),
     errorMessage: signal(overrides.errorMessage ?? null),
+    retryCount: signal(overrides.retryCount ?? 0),
     load: vi.fn(),
   };
 }
@@ -100,6 +102,38 @@ describe('Report', () => {
     );
     refreshButton.click();
     expect(stub.load).toHaveBeenCalled();
+  });
+
+  it('does not show the stuck-loading notice while retryCount is at or below the threshold', async () => {
+    const stub = makeStubService({ status: 'loading', retryCount: 10 });
+    TestBed.configureTestingModule({
+      imports: [Report],
+      providers: [{ provide: ReportService, useValue: stub }],
+    });
+    const fixture = TestBed.createComponent(Report);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const text = fixture.nativeElement.textContent;
+    expect(text).toContain('still being generated');
+    expect(text).not.toContain('Still waiting after 30s');
+    expect(fixture.nativeElement.querySelector('[data-testid="stuck-notice"]')).toBeNull();
+  });
+
+  it('shows the stuck-loading notice once retryCount exceeds the threshold', async () => {
+    const stub = makeStubService({ status: 'loading', retryCount: 11 });
+    TestBed.configureTestingModule({
+      imports: [Report],
+      providers: [{ provide: ReportService, useValue: stub }],
+    });
+    const fixture = TestBed.createComponent(Report);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const text = fixture.nativeElement.textContent;
+    expect(text).toContain('still being generated');
+    expect(text).toContain('Still waiting after 30s — processing-service may not be healthy.');
+    expect(fixture.nativeElement.querySelector('[data-testid="stuck-notice"]')).not.toBeNull();
   });
 
   it('calls load() once on init', () => {

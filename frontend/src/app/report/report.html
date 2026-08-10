@@ -4,6 +4,11 @@
   <p class="banner banner-loading">
     Report is still being generated — Kafka Streams is starting up. This can take a
     few moments.
+    @if (reportService.retryCount() > 10) {
+      <span data-testid="stuck-notice">
+        Still waiting after 30s — processing-service may not be healthy.
+      </span>
+    }
   </p>
 }
 
