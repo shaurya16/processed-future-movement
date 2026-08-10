@@ -1,0 +1,44 @@
+<h1>Daily Summary Report</h1>
+
+@if (reportService.status() === 'loading') {
+  <p class="banner banner-loading">
+    Report is still being generated — Kafka Streams is starting up. This can take a
+    few moments.
+  </p>
+}
+
+@if (reportService.status() === 'error') {
+  <p class="banner banner-error">
+    {{ reportService.errorMessage() }}
+  </p>
+  <button type="button" data-testid="retry" (click)="retry()">Retry</button>
+}
+
+@if (reportService.status() === 'ready') {
+  @if (reportService.entries().length === 0) {
+    <p class="banner banner-empty">No transactions recorded yet.</p>
+  } @else {
+    <table>
+      <thead>
+        <tr>
+          <th>Client_Information</th>
+          <th>Product_Information</th>
+          <th>Total_Transaction_Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (entry of reportService.entries(); track entry.Client_Information + entry.Product_Information) {
+          <tr>
+            <td>{{ entry.Client_Information }}</td>
+            <td>{{ entry.Product_Information }}</td>
+            <td>{{ entry.Total_Transaction_Amount }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+  <div class="actions">
+    <a data-testid="csv-download" href="/api/report/csv" download>Download CSV</a>
+    <button type="button" data-testid="refresh" (click)="refresh()">Refresh</button>
+  </div>
+}
