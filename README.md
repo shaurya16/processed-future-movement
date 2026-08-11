@@ -54,6 +54,11 @@ expected result is visible without running anything.
 - `frontend` — done: Angular UI displays the daily summary report and downloads it as
   CSV, distinguishing "store not ready" (`503`, auto-retries) from "zero rows so far"
   (`200` with `[]`). See its [README](frontend/README.md) for usage.
-- `k8s` — not started.
+- `k8s` — done: manifests for Kafka, `ingestion-service`, `processing-service`, and
+  `frontend` in a `pfm` namespace, plus Dockerfiles for all three application images.
+  `processing-service`'s Kafka Streams startup-ordering bug (fatal if it starts before
+  the `future-transactions` topic exists) is fixed with a k8s-level `initContainer` that
+  waits for the topic directly, not an application-code change. See its
+  [README](k8s/README.md) for local kind/minikube usage.
 
 See `CLAUDE.md` for AI-assistance context on this project.
