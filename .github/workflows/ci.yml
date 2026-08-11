@@ -42,3 +42,22 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+  k8s:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build application images
+        run: |
+          docker build -f ingestion-service/Dockerfile -t pfm/ingestion-service:local .
+          docker build -f processing-service/Dockerfile -t pfm/processing-service:local .
+          docker build -t pfm/frontend:local frontend/
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: pfm
+      - name: Validate manifests
+        # kubectl apply --dry-run=client still needs a reachable API server for
+        # resource-kind discovery, so this runs against the throwaway kind cluster
+        # above rather than truly offline.
+        run: kubectl apply --dry-run=client -f k8s/

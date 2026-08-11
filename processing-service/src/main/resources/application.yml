@@ -24,8 +24,3 @@ management:
           include: readinessState, kafkaStreams
         liveness:
           include: livenessState, kafkaStreams
-  health:
-    livenessstate:
-      enabled: true
-    readinessstate:
-      enabled: true

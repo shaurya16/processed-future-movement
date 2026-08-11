@@ -24,6 +24,13 @@ spec:
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: "kafka:9092"
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
