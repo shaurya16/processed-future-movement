@@ -6,7 +6,7 @@ server {
 
     location /api/ {
         set $upstream http://processing-service.pfm.svc.cluster.local:8082;
-        proxy_pass $upstream/api/;
+        proxy_pass $upstream;
         proxy_set_header Host $host;
     }
 
