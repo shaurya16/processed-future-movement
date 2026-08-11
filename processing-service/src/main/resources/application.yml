@@ -13,3 +13,17 @@ spring:
 
 processing:
   topic: future-transactions
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState, kafkaStreams
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
