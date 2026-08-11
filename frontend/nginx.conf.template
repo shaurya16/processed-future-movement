@@ -2,6 +2,7 @@ server {
     listen 80;
     root /usr/share/nginx/html;
     index index.html;
+    resolver ${NGINX_LOCAL_RESOLVERS};
 
     location /api/ {
         set $upstream http://processing-service:8082;
