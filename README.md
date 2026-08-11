@@ -59,6 +59,6 @@ expected result is visible without running anything.
   `processing-service`'s Kafka Streams startup-ordering bug (fatal if it starts before
   the `future-transactions` topic exists) is fixed with a k8s-level `initContainer` that
   waits for the topic directly, not an application-code change. See its
-  [README](k8s/README.md) for local kind/minikube usage.
+  [README](k8s/README.md) for local kind usage.
 
 See `CLAUDE.md` for AI-assistance context on this project.
