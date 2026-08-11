@@ -91,12 +91,20 @@ class FullPipelineGoldenTest {
     }
 
     private String awaitFullReportCsv(RestTemplate rest) {
+        // Polling for a 6-line response (header + 5 rows) is not a sufficient "done" signal:
+        // Kafka Streams materializes the KTable incrementally as it consumes the topic, so all
+        // 5 distinct keys can appear in the store well before every one of the 717 records has
+        // actually been folded into their aggregates. On a fast machine that race window is too
+        // narrow to hit; on a slower/shared CI runner it isn't, producing a report snapshot with
+        // the right keys but partially-aggregated values. Polling for the exact expected content
+        // instead makes "done" mean "the aggregation has actually converged," not just "the
+        // right rows exist yet."
         long deadline = System.currentTimeMillis() + 60_000;
         String lastBody = null;
         while (System.currentTimeMillis() < deadline) {
             try {
                 lastBody = rest.getForObject("http://localhost:18082/api/report/csv", String.class);
-                if (lastBody != null && lastBody.lines().count() == 6) {
+                if (EXPECTED_CSV.equals(lastBody)) {
                     return lastBody;
                 }
             } catch (RestClientException ignored) {
@@ -108,7 +116,7 @@ class FullPipelineGoldenTest {
                 Thread.currentThread().interrupt();
             }
         }
-        fail("processing-service did not produce the expected 6-line report within 60s; last body: " + lastBody);
+        fail("processing-service did not produce the expected report within 60s; last body: " + lastBody);
         return null;
     }
 }
