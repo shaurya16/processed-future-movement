@@ -22,7 +22,7 @@ spec:
             - sh
             - -c
             - |
-              until kafka-topics.sh --bootstrap-server kafka:9092 --list | grep -qx future-transactions; do
+              until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list | grep -qx future-transactions; do
                 echo "waiting for future-transactions topic..."
                 sleep 2
               done
