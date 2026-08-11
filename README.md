@@ -47,8 +47,12 @@ curl -X POST http://localhost:8081/api/ingest
 ```
 
 `processing-service` waits for the `future-transactions` topic to exist before starting,
-so `pfm-wait-for-topic` running briefly is expected, not a failure. Tear down with
-`docker compose down -v`.
+so seeing `pfm-wait-for-topic` as `Exited (0)` in `docker compose ps -a` is expected, not
+a failure (it's a one-shot container, so it won't show up in plain `docker compose ps`
+at all). That wait loop has no timeout, so if `docker compose up -d --build` seems to
+hang — `processing-service` never reports healthy — check `docker compose logs
+wait-for-topic` in a second terminal to see whether it's still polling or Kafka never
+came up. Tear down with `docker compose down -v`.
 
 For the Kubernetes path instead, see [k8s/README.md](k8s/README.md).
 
