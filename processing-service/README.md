@@ -15,7 +15,7 @@ Design decisions: [docs/superpowers/specs/2026-08-09-processing-service-design.m
 Run these from the **repo root**:
 
 ```bash
-docker compose up -d
+docker compose up -d kafka
 mvn -q -DskipTests install
 mvn -pl processing-service spring-boot:run
 ```

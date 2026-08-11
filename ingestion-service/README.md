@@ -14,7 +14,7 @@ Design decisions: [docs/superpowers/specs/2026-08-09-ingestion-service-design.md
 Run these from the **repo root**:
 
 ```bash
-docker compose up -d                                          # starts a local Kafka broker on localhost:9092
+docker compose up -d kafka                                    # starts a local Kafka broker on localhost:9092
 mvn -q -DskipTests install                                     # builds & installs `common` (and all modules) to the local repo
 INGESTION_FILE_PATH="$PWD/sample-data/Input.txt" mvn -pl ingestion-service spring-boot:run
 ```

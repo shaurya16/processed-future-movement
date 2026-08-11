@@ -31,8 +31,35 @@ Input.txt --> ingestion-service --> Kafka topic --> processing-service --> REST 
 | [`frontend`](frontend/) | Angular UI to view and download the daily summary |
 | [`k8s`](k8s/) | Kubernetes manifests for the whole stack |
 
-Local dev stack (Kafka, etc.) is defined in `docker-compose.yml` (added alongside the
-service implementations).
+## Running the whole stack
+
+Everything in containers, one command (first run builds three images, so it takes a
+few minutes):
+
+```bash
+docker compose up -d --build
+```
+
+Then publish the sample data and open the UI at `http://localhost:8080`:
+
+```bash
+curl -X POST http://localhost:8081/api/ingest
+```
+
+`processing-service` waits for the `future-transactions` topic to exist before starting,
+so `pfm-wait-for-topic` running briefly is expected, not a failure. Tear down with
+`docker compose down -v`.
+
+For the Kubernetes path instead, see [k8s/README.md](k8s/README.md).
+
+### Just the broker
+
+To run the services on the host via Maven and containerize only Kafka — the loop the
+service READMEs describe:
+
+```bash
+docker compose up -d kafka
+```
 
 ## Sample output
 
