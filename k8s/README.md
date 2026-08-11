@@ -33,6 +33,7 @@ Trigger ingestion of the sample data:
 
 ```bash
 kubectl port-forward -n pfm svc/ingestion-service 18081:8081 &
+sleep 2
 curl -X POST http://localhost:18081/api/ingest
 ```
 
@@ -45,6 +46,17 @@ kubectl port-forward -n pfm svc/frontend 30080:80 &
 ```
 
 Open `http://localhost:30080`.
+
+## Limitations
+
+Scoped to a local kind/minikube demo only, not production-ready:
+
+- Containers run as root — no `securityContext`/`runAsNonRoot` on any pod.
+- No resource requests/limits on any container.
+- Kafka runs on PLAINTEXT with no authentication and a hardcoded `CLUSTER_ID`.
+- Kafka's data directory is an `emptyDir` — all topic data is lost on pod restart.
+- No `startupProbe` — a slow-starting JVM under load could hit the liveness probe's
+  failure threshold before finishing startup.
 
 ## Tearing down
 
