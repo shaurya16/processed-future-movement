@@ -10,3 +10,14 @@ spring:
 ingestion:
   file-path: ${INGESTION_FILE_PATH:sample-data/Input.txt}
   topic: future-transactions
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
