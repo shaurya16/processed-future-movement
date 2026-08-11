@@ -9,7 +9,7 @@ COPY ingestion-service/src ingestion-service/src
 COPY processing-service/src processing-service/src
 RUN mvn -B -pl processing-service -am -DskipTests package
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:21-jre
 WORKDIR /app
 COPY --from=build /workspace/processing-service/target/processing-service-0.1.0-SNAPSHOT.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]
