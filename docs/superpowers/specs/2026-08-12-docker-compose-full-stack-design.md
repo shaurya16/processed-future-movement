@@ -41,16 +41,20 @@ rather than baked into the image.
 
 ## Decisions made during brainstorming
 
-1. **Layout — compose profiles in the existing `docker-compose.yml`, not a second file.**
-   `kafka` stays unprofiled; `ingestion-service`, `processing-service`, `frontend`, and
-   `wait-for-topic` all carry `profiles: [full]`. `docker compose up -d` therefore
-   continues to start Kafka *only*, exactly as the two service READMEs already document,
-   while `docker compose --profile full up -d --build` runs the entire stack.
+1. **Layout — all five services in the existing `docker-compose.yml`, no profiles.**
+   `docker compose up -d --build` brings up the entire stack. One command with no flags to
+   remember is the point of this slice, so the headline use case gets the plainest
+   invocation.
+   - **Accepted consequence**: this redefines what `docker compose up -d` does. Both
+     service READMEs document it today as "start a Kafka broker" before running the
+     services on the host via `mvn spring-boot:run`. Compose's own service selection covers
+     that case — `docker compose up -d kafka` starts the broker alone — so both READMEs are
+     updated to that command rather than the stack giving up its one-command entry point.
+   - **Why not compose profiles** (`profiles: [full]` on everything but `kafka`): would
+     leave today's `docker compose up -d` semantics untouched and need no README edits, but
+     puts the primary use case behind an extra flag.
    - **Why not a separate `docker-compose.full.yml`**: cleanest separation, but the Kafka
      service definition would be duplicated across two files and free to drift.
-   - **Why not extend `docker-compose.yml` with no profiles**: simplest file, but it
-     silently redefines what the READMEs' documented `docker compose up -d` does, and
-     forces a full Maven image build on someone who only wanted a broker.
 2. **nginx upstream — an env var substituted into the template, applied to both
    environments.** `frontend/nginx.conf.template` changes to
    `set $upstream ${PROCESSING_SERVICE_UPSTREAM};`. Compose sets
@@ -122,8 +126,7 @@ rather than baked into the image.
 **Modified files:**
 
 - **`docker-compose.yml`** — `kafka` gains a `healthcheck` (`kafka-topics.sh --list`
-  against `localhost:9092` inside the container) and keeps no profile. Four services
-  added, all with `profiles: [full]`:
+  against `localhost:9092` inside the container). Four services added, none profiled:
 
   | Service | Image / build | Host port | Depends on |
   |---|---|---|---|
@@ -152,14 +155,15 @@ rather than baked into the image.
 
 - **`README.md`** — a full-stack compose section alongside the existing k8s instructions.
 
-**Unchanged:** `ingestion-service/README.md` and `processing-service/README.md` (their
-documented `docker compose up -d` dev loop still behaves identically), `k8s/README.md`,
-all three Dockerfiles, and all application code.
+- **`ingestion-service/README.md`** and **`processing-service/README.md`** — the dev-loop's
+  first step changes from `docker compose up -d` to `docker compose up -d kafka`, so it
+  still starts a broker alone now that the bare command starts everything.
+
+**Unchanged:** `k8s/README.md`, all three Dockerfiles, and all application code.
 
 ## Data flow (startup)
 
-1. `docker compose --profile full up -d --build` builds the three images and starts
-   `kafka`.
+1. `docker compose up -d --build` builds the three images and starts `kafka`.
 2. `kafka` passes its healthcheck; `ingestion-service` and `wait-for-topic` both start.
 3. `ingestion-service`'s Spring context boots and creates `future-transactions` via its
    existing `NewTopic` bean, independent of whether `POST /api/ingest` is ever called.
@@ -192,15 +196,16 @@ all three Dockerfiles, and all application code.
 
 - **Compose, from a clean state** (`docker compose down -v` first, so no topic
   pre-exists — the condition the ordering fix actually guards against):
-  1. `docker compose --profile full up -d --build`; all five containers reach their
-     expected state, `wait-for-topic` exits 0, and `processing-service`'s log shows no
+  1. `docker compose up -d --build`; all five containers reach their expected state,
+     `wait-for-topic` exits 0, and `processing-service`'s log shows no
      `MissingSourceTopicException`.
   2. `curl -X POST http://localhost:8081/api/ingest` reports 717 published, 0 errors.
   3. `curl http://localhost:8082/api/report/csv` matches `sample-output/Output.csv`.
   4. `http://localhost:8080` renders the report table through the nginx proxy — proving
      the rendered upstream works, which a `curl` straight to 8082 would not.
-- **Profile isolation**: after `docker compose down`, a plain `docker compose up -d`
-  starts the `kafka` container only.
+- **Kafka-only dev loop**: after `docker compose down`, `docker compose up -d kafka`
+  starts the `kafka` container and nothing else — the path both service READMEs now
+  document, so a regression here silently breaks the documented dev loop.
 - **k8s regression** (`kind`): rebuild and load the `frontend` image, `kubectl apply -f
   k8s/`, and confirm the frontend still renders the report — the template change is
   shared with the k8s path, so this is a regression risk, not a formality.
@@ -214,4 +219,4 @@ all three Dockerfiles, and all application code.
   limitations the k8s README already documents apply here.
 - Replacing `kind` as the Kubernetes path, or unifying the two deployment descriptions
   into one tool. Compose and k8s remain two independent ways to run the stack.
-- Any change to application code, the three Dockerfiles, or the two service READMEs.
+- Any change to application code or the three Dockerfiles.
