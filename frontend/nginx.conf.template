@@ -5,7 +5,7 @@ server {
     resolver ${NGINX_LOCAL_RESOLVERS};
 
     location /api/ {
-        set $upstream http://processing-service:8082;
+        set $upstream http://processing-service.pfm.svc.cluster.local:8082;
         proxy_pass $upstream/api/;
         proxy_set_header Host $host;
     }
