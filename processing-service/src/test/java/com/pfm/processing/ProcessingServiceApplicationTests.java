@@ -27,4 +27,11 @@ class ProcessingServiceApplicationTests {
 
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
     }
+
+    @Test
+    void livenessProbeReportsDownWhenKafkaStreamsHasNotStarted() {
+        ResponseEntity<String> response = restTemplate.getForEntity("/actuator/health/liveness", String.class);
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
+    }
 }
