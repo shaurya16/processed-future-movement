@@ -16,7 +16,16 @@ jobs:
           java-version: "21"
           cache: maven
       - name: mvn clean verify
-        run: mvn -B clean verify
+        # ingestion-service/pom.xml and processing-service/pom.xml pin
+        # testcontainers.docker.api.version=1.51 for Testcontainers' Docker API
+        # negotiation, tuned for local Docker Desktop (see that property's comment
+        # in ingestion-service/pom.xml for the full story). GitHub-hosted runners use
+        # a plain Linux Docker Engine with a different supported API range, so forcing
+        # 1.51 here makes every Testcontainers connection attempt fail with
+        # "Could not find a valid Docker environment". Clearing the property lets
+        # Testcontainers auto-negotiate against the runner's actual engine instead,
+        # exactly as documented in that pom.xml comment's override instructions.
+        run: mvn -B clean verify -Dtestcontainers.docker.api.version=
 
   frontend:
     runs-on: ubuntu-latest
