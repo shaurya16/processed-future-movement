@@ -5,12 +5,16 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.pfm.common.domain.FutureTransaction;
 import com.pfm.processing.report.ReportEntry;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,6 +52,25 @@ class ProcessingEndToEndTest {
     static void kafkaProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
         registry.add("spring.kafka.streams.application-id", () -> "processing-service-e2e-test");
+    }
+
+    // processing-service deliberately never creates future-transactions itself (see the k8s
+    // slice's ordering-bug design) -- in production, ingestion-service's NewTopic bean always
+    // creates it first. This test has no ingestion-service context at all (it publishes directly
+    // via a raw KafkaProducer), so without this, Kafka Streams' StreamThread can start against a
+    // fresh broker with no future-transactions topic yet, hit "Missing source topics", and
+    // fatally, permanently die (PENDING_ERROR -> DEAD -> ERROR) with no self-recovery -- the
+    // exact failure mode the ordering-bug fix exists to prevent in the real deployment, just
+    // reproduced here as flaky test failures instead. Creating the topic before the Spring
+    // context (and therefore Kafka Streams) starts removes the race entirely.
+    @BeforeAll
+    static void createFutureTransactionsTopic() throws Exception {
+        Map<String, Object> adminProps = Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());
+        try (AdminClient admin = AdminClient.create(adminProps)) {
+            admin.createTopics(List.of(new NewTopic("future-transactions", 3, (short) 1)))
+                    .all()
+                    .get(10, TimeUnit.SECONDS);
+        }
     }
 
     @Autowired
@@ -89,8 +112,14 @@ class ProcessingEndToEndTest {
     }
 
     private void awaitReportEntry(String key, long expectedNetQuantity) {
+        // 60s (bumped from 30s) is headroom for Kafka Streams to reach RUNNING on a
+        // slower/shared CI runner, matching the budget FullPipelineGoldenTest already uses for
+        // the same kind of wait. Not the primary fix for this test's flakiness, though: that was
+        // createFutureTransactionsTopic() above, guaranteeing the topic exists before Kafka
+        // Streams ever starts -- without it, no timeout here would help, since a stream thread
+        // that dies from missing source topics never recovers.
         String[] parts = key.split("\\|", 2);
-        long deadline = System.currentTimeMillis() + 30_000;
+        long deadline = System.currentTimeMillis() + 60_000;
         ResponseEntity<ReportEntry[]> lastResponse = null;
         while (System.currentTimeMillis() < deadline) {
             try {
@@ -118,7 +147,7 @@ class ProcessingEndToEndTest {
             }
         }
         fail("expected report entry for " + key + " with netQuantity=" + expectedNetQuantity
-                + " not observed within 30s; last response body: "
+                + " not observed within 60s; last response body: "
                 + (lastResponse == null ? "null" : java.util.Arrays.toString(lastResponse.getBody())));
     }
 
