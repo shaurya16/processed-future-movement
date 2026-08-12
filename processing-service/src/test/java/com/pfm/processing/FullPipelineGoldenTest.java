@@ -4,6 +4,7 @@ import com.pfm.ingestion.IngestionResult;
 import com.pfm.ingestion.IngestionServiceApplication;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.web.client.RestClientException;
@@ -12,7 +13,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,16 +25,26 @@ import static org.junit.jupiter.api.Assertions.fail;
 @Testcontainers
 class FullPipelineGoldenTest {
 
-    private static final String EXPECTED_CSV =
-            "Client_Information,Product_Information,Total_Transaction_Amount\n"
-                    + "CL123400020001,SGXFUNK20100910,-52\n"
-                    + "CL123400030001,CMEFUN120100910,285\n"
-                    + "CL123400030001,CMEFUNK.20100910,-215\n"
-                    + "CL432100020001,SGXFUNK20100910,46\n"
-                    + "CL432100030001,CMEFUN120100910,-79\n";
+    /**
+     * Read from the committed fixture rather than inlined, so this test fails if the
+     * pipeline's output and sample-output/Output.csv ever disagree. The copy in
+     * src/test/resources must stay in sync with sample-output/Output.csv — the same
+     * convention Input.txt already follows.
+     */
+    private static String expectedCsv() throws IOException {
+        try (InputStream in = FullPipelineGoldenTest.class.getResourceAsStream("/Output.csv")) {
+            if (in == null) {
+                throw new IllegalStateException("Missing test fixture /Output.csv on the classpath");
+            }
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
 
     @Container
     static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.9.2");
+
+    @TempDir
+    static Path streamsStateDir;
 
     private ConfigurableApplicationContext ingestionContext;
     private ConfigurableApplicationContext processingContext;
@@ -47,7 +61,7 @@ class FullPipelineGoldenTest {
     }
 
     @Test
-    void fullPipelineProducesTheExpectedDailySummary() throws URISyntaxException {
+    void fullPipelineProducesTheExpectedDailySummary() throws URISyntaxException, IOException {
         // ingestion-service and processing-service both ship an application.yml at the
         // identical classpath location (classpath:/application.yml). Booting both as real
         // apps in this one JVM puts ingestion-service's jar (a test-scope dependency) and
@@ -78,6 +92,7 @@ class FullPipelineGoldenTest {
                         "server.port=18082",
                         "spring.kafka.bootstrap-servers=" + kafka.getBootstrapServers(),
                         "spring.kafka.streams.application-id=processing-service-golden-test",
+                        "spring.kafka.streams.state-dir=" + streamsStateDir.toAbsolutePath(),
                         "processing.topic=future-transactions")
                 .run();
 
@@ -86,11 +101,13 @@ class FullPipelineGoldenTest {
                 "http://localhost:18081/api/v1/ingest", null, IngestionResult.class);
         assertEquals(717, ingestResult.published());
 
-        String csv = awaitFullReportCsv(rest);
-        assertEquals(EXPECTED_CSV, csv);
+        String expected = expectedCsv();
+        String csv = awaitFullReportCsv(rest, expected);
+        assertEquals(expected, csv,
+                "CSV output must stay byte-identical to sample-output/Output.csv");
     }
 
-    private String awaitFullReportCsv(RestTemplate rest) {
+    private String awaitFullReportCsv(RestTemplate rest, String expectedCsv) {
         // Polling for a 6-line response (header + 5 rows) is not a sufficient "done" signal:
         // Kafka Streams materializes the KTable incrementally as it consumes the topic, so all
         // 5 distinct keys can appear in the store well before every one of the 717 records has
@@ -104,7 +121,7 @@ class FullPipelineGoldenTest {
         while (System.currentTimeMillis() < deadline) {
             try {
                 lastBody = rest.getForObject("http://localhost:18082/api/v1/report/csv", String.class);
-                if (EXPECTED_CSV.equals(lastBody)) {
+                if (expectedCsv.equals(lastBody)) {
                     return lastBody;
                 }
             } catch (RestClientException ignored) {
