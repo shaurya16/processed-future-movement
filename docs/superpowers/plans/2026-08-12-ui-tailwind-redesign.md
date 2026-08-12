@@ -2085,8 +2085,23 @@ entry on the container:
 
 ```yaml
             - name: INGESTION_SERVICE_UPSTREAM
-              value: http://ingestion-service:8081
+              value: "http://ingestion-service.pfm.svc.cluster.local:8081"
 ```
+
+**The FQDN is mandatory, not stylistic.** `proxy_pass $variable` makes nginx
+resolve the host at request time through its own `resolver`, and nginx's resolver
+does **not** apply the `search` suffixes from `/etc/resolv.conf` — only
+glibc-based resolvers do. A bare `ingestion-service` is a single-label query that
+falls outside CoreDNS's `cluster.local` zone, returns NXDOMAIN, and yields 502 on
+every status request in-cluster. Docker Compose masks this completely: its
+embedded DNS resolves bare service names directly, so a Compose-only check passes
+while k8s is broken.
+
+This repo has already been bitten twice — `01d1633` ("use FQDN for
+processing-service upstream") and `736b6f4`, whose message states it outright:
+"The short name that Docker resolves does not work in Kubernetes either, because
+nginx's resolver skips search-domain expansion." Match the FQDN form the
+`PROCESSING_SERVICE_UPSTREAM` entry beside it already uses.
 
 - [ ] **Step 4: Add the dev-server proxy entry**
 
