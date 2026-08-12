@@ -3924,7 +3924,7 @@ const MS_PER_DAY = 86_400_000;
 /**
  * Days-to-expiry measured against the row's LAST TRADE DATE, deliberately not
  * against today. The sample data expires in 2010, so a wall-clock comparison
- * would badge every row "expired" — true but информационally empty. Relative to
+ * would badge every row "expired" — true but informationally empty. Relative to
  * the trade date the number describes the data, which is what the reader wants.
  *
  * Labels name the reference point ("as of trade date") so a historical report is
@@ -3974,9 +3974,6 @@ export function barGeometry(value: number, maxAbsolute: number): BarGeometry {
   };
 }
 ```
-
-Note: remove the stray non-ASCII word if your editor introduced one — the comment
-should read "informationally empty".
 
 - [ ] **Step 3: Run the cell-view test**
 
@@ -4327,6 +4324,732 @@ git add frontend/src/app/report/cell-view.ts frontend/src/app/report/cell-view.s
         frontend/src/app/report/report-table.ts frontend/src/app/report/report-table.html \
         frontend/src/app/report/report-table.spec.ts
 git commit -m "feat(frontend): add the report table with diverging net bar and expiry badges"
+```
+
+---
+
+## Task 17: Filter bar, column picker, refresh control
+
+**Files:**
+- Create: `frontend/src/app/report/filter-bar.ts`
+- Create: `frontend/src/app/report/column-picker.ts`
+- Create: `frontend/src/app/report/refresh-control.ts`
+- Test: `frontend/src/app/report/filter-bar.spec.ts`
+- Test: `frontend/src/app/report/refresh-control.spec.ts`
+
+**Interfaces:**
+- Consumes: `ReportFilters` (Task 14), `ColumnPreferences` + `COLUMN_GROUPS`
+  (Task 13), `ReportService` (Task 12), `formatRelative` (Task 15).
+- Produces: `FilterBar` (`app-filter-bar`), `ColumnPicker` (`app-column-picker`),
+  `RefreshControl` (`app-refresh-control`). Task 19 composes all three.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `frontend/src/app/report/filter-bar.spec.ts`:
+
+```ts
+import { signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { FilterBar } from './filter-bar';
+import { ReportFilters } from './report-filters';
+
+function setup() {
+  const filters = {
+    client: signal(''),
+    account: signal(''),
+    product: signal(''),
+    search: signal(''),
+    clientOptions: signal(['CL123400020001', 'CL432100020001']),
+    accountOptions: signal(['0002', '0003']),
+    productOptions: signal(['CMEFUNK.20100910', 'SGXFUNK20100910']),
+    rows: signal([]),
+    totalCount: signal(5),
+    activeFilterCount: signal(0),
+    setClient: vi.fn(),
+    setAccount: vi.fn(),
+    setProduct: vi.fn(),
+    setSearch: vi.fn(),
+    clearAll: vi.fn(),
+  };
+  TestBed.configureTestingModule({
+    imports: [FilterBar],
+    providers: [{ provide: ReportFilters, useValue: filters }],
+  });
+  return filters;
+}
+
+describe('FilterBar', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+
+  it('populates each dimension select from the data, plus an All option', async () => {
+    setup();
+    const fixture = TestBed.createComponent(FilterBar);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const clientSelect: HTMLSelectElement = fixture.nativeElement.querySelector(
+      'select[data-testid="filter-client"]',
+    );
+    // 2 values + "All"
+    expect(clientSelect.options.length).toBe(3);
+    expect(clientSelect.options[0].textContent).toContain('All');
+  });
+
+  it('reports the visible-of-total count', async () => {
+    const filters = setup();
+    filters.rows.set([{} as never, {} as never]);
+    const fixture = TestBed.createComponent(FilterBar);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('2 of 5');
+  });
+
+  it('shows a clear-all control only while a filter is active', async () => {
+    const filters = setup();
+    const fixture = TestBed.createComponent(FilterBar);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('[data-testid="clear-filters"]')).toBeNull();
+
+    filters.activeFilterCount.set(1);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('[data-testid="clear-filters"]')).not.toBeNull();
+  });
+
+  it('forwards a search entry', async () => {
+    const filters = setup();
+    const fixture = TestBed.createComponent(FilterBar);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const input: HTMLInputElement = fixture.nativeElement.querySelector(
+      'input[data-testid="filter-search"]',
+    );
+    input.value = 'NK';
+    input.dispatchEvent(new Event('input'));
+
+    expect(filters.setSearch).toHaveBeenCalledWith('NK');
+  });
+});
+```
+
+Create `frontend/src/app/report/refresh-control.spec.ts`:
+
+```ts
+import { signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { RefreshControl } from './refresh-control';
+import { ReportService } from './report.service';
+
+function setup(autoRefresh: boolean, stale = false) {
+  const service = {
+    autoRefresh: signal(autoRefresh),
+    stale: signal(stale),
+    lastLoadedAt: signal<Date | null>(new Date('2026-08-12T14:31:52Z')),
+    errorMessage: signal<string | null>(stale ? 'network down' : null),
+    setAutoRefresh: vi.fn(),
+    refresh: vi.fn(),
+  };
+  TestBed.configureTestingModule({
+    imports: [RefreshControl],
+    providers: [{ provide: ReportService, useValue: service }],
+  });
+  return service;
+}
+
+describe('RefreshControl', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+
+  it('disables the manual button while auto-refresh is on', async () => {
+    setup(true);
+    const fixture = TestBed.createComponent(RefreshControl);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const button: HTMLButtonElement = fixture.nativeElement.querySelector(
+      'button[data-testid="refresh"]',
+    );
+    expect(button.disabled).toBe(true);
+  });
+
+  it('enables the manual button when auto-refresh is off and wires it', async () => {
+    const service = setup(false);
+    const fixture = TestBed.createComponent(RefreshControl);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const button: HTMLButtonElement = fixture.nativeElement.querySelector(
+      'button[data-testid="refresh"]',
+    );
+    expect(button.disabled).toBe(false);
+    button.click();
+    expect(service.refresh).toHaveBeenCalled();
+  });
+
+  it('toggling the switch forwards the new state', async () => {
+    const service = setup(true);
+    const fixture = TestBed.createComponent(RefreshControl);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const toggle: HTMLInputElement = fixture.nativeElement.querySelector(
+      'input[data-testid="auto-refresh"]',
+    );
+    toggle.click();
+
+    expect(service.setAutoRefresh).toHaveBeenCalledWith(false);
+  });
+
+  it('shows a stale badge when a refresh has failed', async () => {
+    setup(true, true);
+    const fixture = TestBed.createComponent(RefreshControl);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('[data-testid="stale-badge"]')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('network down');
+  });
+
+  it('shows no stale badge when healthy', async () => {
+    setup(true, false);
+    const fixture = TestBed.createComponent(RefreshControl);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('[data-testid="stale-badge"]')).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `cd frontend && npx vitest run src/app/report/filter-bar.spec.ts src/app/report/refresh-control.spec.ts`
+Expected: FAIL — cannot resolve the components.
+
+- [ ] **Step 3: Implement `FilterBar`**
+
+Create `frontend/src/app/report/filter-bar.ts`:
+
+```ts
+import { Component, inject } from '@angular/core';
+import { ReportFilters } from './report-filters';
+
+@Component({
+  selector: 'app-filter-bar',
+  template: `
+    <div class="flex flex-wrap items-end gap-3">
+      <label class="flex flex-col gap-1 text-xs text-ink-muted">
+        Client
+        <select
+          data-testid="filter-client"
+          class="rounded border border-rule bg-surface-1 px-2 py-1 text-sm text-ink-primary"
+          [value]="filters.client()"
+          (change)="filters.setClient($any($event.target).value)"
+        >
+          <option value="">All ({{ filters.clientOptions().length }})</option>
+          @for (option of filters.clientOptions(); track option) {
+            <option [value]="option">{{ option }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="flex flex-col gap-1 text-xs text-ink-muted">
+        Account
+        <select
+          data-testid="filter-account"
+          class="rounded border border-rule bg-surface-1 px-2 py-1 text-sm text-ink-primary"
+          [value]="filters.account()"
+          (change)="filters.setAccount($any($event.target).value)"
+        >
+          <option value="">All ({{ filters.accountOptions().length }})</option>
+          @for (option of filters.accountOptions(); track option) {
+            <option [value]="option">{{ option }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="flex flex-col gap-1 text-xs text-ink-muted">
+        Product
+        <select
+          data-testid="filter-product"
+          class="rounded border border-rule bg-surface-1 px-2 py-1 text-sm text-ink-primary"
+          [value]="filters.product()"
+          (change)="filters.setProduct($any($event.target).value)"
+        >
+          <option value="">All ({{ filters.productOptions().length }})</option>
+          @for (option of filters.productOptions(); track option) {
+            <option [value]="option">{{ option }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="flex flex-col gap-1 text-xs text-ink-muted">
+        Search
+        <input
+          type="search"
+          data-testid="filter-search"
+          placeholder="any field"
+          class="rounded border border-rule bg-surface-1 px-2 py-1 text-sm text-ink-primary"
+          [value]="filters.search()"
+          (input)="filters.setSearch($any($event.target).value)"
+        />
+      </label>
+
+      <p class="ml-auto text-sm text-ink-secondary" aria-live="polite">
+        {{ filters.rows().length }} of {{ filters.totalCount() }} rows
+        @if (filters.activeFilterCount() > 0) {
+          <button
+            type="button"
+            data-testid="clear-filters"
+            class="ml-2 underline hover:text-ink-primary"
+            (click)="filters.clearAll()"
+          >
+            Clear filters
+          </button>
+        }
+      </p>
+    </div>
+  `,
+})
+export class FilterBar {
+  protected readonly filters = inject(ReportFilters);
+}
+```
+
+- [ ] **Step 4: Implement `ColumnPicker`**
+
+Create `frontend/src/app/report/column-picker.ts`:
+
+```ts
+import { Component, inject, signal } from '@angular/core';
+import { ColumnPreferences } from './column-preferences';
+import { COLUMN_GROUPS, ColumnGroup, REPORT_COLUMNS } from './report-columns';
+
+@Component({
+  selector: 'app-column-picker',
+  template: `
+    <div class="relative">
+      <button
+        type="button"
+        data-testid="column-picker-toggle"
+        class="rounded border border-rule px-2 py-1 text-sm text-ink-secondary hover:text-ink-primary"
+        [attr.aria-expanded]="open()"
+        (click)="open.set(!open())"
+      >
+        Columns ({{ columnPreferences.visibleIds().length }}) ▾
+      </button>
+
+      @if (open()) {
+        <div
+          class="absolute right-0 z-10 mt-1 max-h-80 w-64 overflow-y-auto rounded-lg border border-rule bg-surface-1 p-3 shadow-lg"
+        >
+          @for (group of groups; track group) {
+            <p class="mt-2 text-xs font-semibold uppercase tracking-wide text-ink-muted first:mt-0">
+              {{ group }}
+            </p>
+            @for (column of columnsIn(group); track column.id) {
+              <label class="flex items-center gap-2 py-1 text-sm text-ink-primary">
+                <input
+                  type="checkbox"
+                  [attr.data-testid]="'column-' + column.id"
+                  [checked]="columnPreferences.isVisible(column.id)"
+                  (change)="columnPreferences.toggle(column.id)"
+                />
+                {{ column.label }}
+              </label>
+            }
+          }
+          <button
+            type="button"
+            data-testid="reset-columns"
+            class="mt-3 w-full rounded border border-rule py-1 text-sm text-ink-secondary hover:text-ink-primary"
+            (click)="columnPreferences.reset()"
+          >
+            Reset to defaults
+          </button>
+        </div>
+      }
+    </div>
+  `,
+})
+export class ColumnPicker {
+  protected readonly columnPreferences = inject(ColumnPreferences);
+  protected readonly open = signal(false);
+  protected readonly groups = COLUMN_GROUPS;
+
+  protected columnsIn(group: ColumnGroup) {
+    return REPORT_COLUMNS.filter((column) => column.group === group);
+  }
+}
+```
+
+- [ ] **Step 5: Implement `RefreshControl`**
+
+Create `frontend/src/app/report/refresh-control.ts`:
+
+```ts
+import { Component, inject } from '@angular/core';
+import { ReportService } from './report.service';
+import { formatRelative } from './format';
+
+@Component({
+  selector: 'app-refresh-control',
+  template: `
+    <div class="flex flex-wrap items-center gap-3 text-sm">
+      <label class="flex items-center gap-2 text-ink-secondary">
+        <input
+          type="checkbox"
+          data-testid="auto-refresh"
+          [checked]="reportService.autoRefresh()"
+          (change)="reportService.setAutoRefresh($any($event.target).checked)"
+        />
+        Auto-refresh
+      </label>
+
+      <!-- Manual refresh is only meaningful when polling is off. -->
+      <button
+        type="button"
+        data-testid="refresh"
+        class="rounded border border-rule px-2 py-1 text-ink-secondary hover:text-ink-primary disabled:opacity-40"
+        [disabled]="reportService.autoRefresh()"
+        (click)="reportService.refresh()"
+      >
+        Refresh
+      </button>
+
+      <span class="text-ink-muted" data-testid="last-updated">
+        updated {{ relative(reportService.lastLoadedAt()) }}
+      </span>
+
+      @if (reportService.stale()) {
+        <span
+          data-testid="stale-badge"
+          class="rounded bg-status-warning/20 px-1.5 py-0.5 text-xs text-ink-primary"
+        >
+          ⚠ stale — {{ reportService.errorMessage() }}
+        </span>
+      }
+    </div>
+  `,
+})
+export class RefreshControl {
+  protected readonly reportService = inject(ReportService);
+
+  protected relative(date: Date | null): string {
+    return formatRelative(date === null ? null : date.toISOString());
+  }
+}
+```
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+Run: `cd frontend && npx vitest run src/app/report/filter-bar.spec.ts src/app/report/refresh-control.spec.ts`
+Expected: PASS — 9 tests.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add frontend/src/app/report/filter-bar.ts frontend/src/app/report/filter-bar.spec.ts \
+        frontend/src/app/report/column-picker.ts \
+        frontend/src/app/report/refresh-control.ts \
+        frontend/src/app/report/refresh-control.spec.ts
+git commit -m "feat(frontend): add filter bar, column picker and refresh control"
+```
+
+---
+
+## Task 18: KPI row
+
+**Files:**
+- Create: `frontend/src/app/report/kpi-row.ts`
+- Test: `frontend/src/app/report/kpi-row.spec.ts`
+
+**Interfaces:**
+- Consumes: `ReportFilters` (Task 14), `IngestionStatusService` (Task 15).
+- Produces: `KpiRow` standalone component, selector `app-kpi-row`.
+
+**There is deliberately no "total net quantity" tile.** Summing net quantity
+across different contracts adds quantities of different instruments, which is not
+a number. Every tile here is genuinely additive.
+
+**Fee totals are per currency and are negative.** `D` = debit = negative, and
+every money field in the sample carries `D`, so `USD -0.90` is correct output —
+not a sign bug to "fix".
+
+`sum(tradeCount)` versus the file's `published` count is a real reconciliation: a
+mismatch means records were lost between ingestion and aggregation, so the tile
+carries a warning when they disagree.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `frontend/src/app/report/kpi-row.spec.ts`:
+
+```ts
+import { signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { KpiRow } from './kpi-row';
+import { ReportFilters } from './report-filters';
+import { IngestionStatusService } from './ingestion-status.service';
+import { IngestionStatus, ReportEntry } from './report-entry';
+
+function row(overrides: Partial<ReportEntry> = {}): ReportEntry {
+  return {
+    Client_Information: 'CL432100020001',
+    Product_Information: 'SGXFUNK20100910',
+    Total_Transaction_Amount: 46,
+    clientType: 'CL',
+    clientNumber: '4321',
+    accountNumber: '0002',
+    subaccountNumber: '0001',
+    exchangeCode: 'SGX',
+    productGroupCode: 'FU',
+    symbol: 'NK',
+    expirationDate: '2010-09-10',
+    grossLong: 46,
+    grossShort: 0,
+    tradeCount: 3,
+    firstTransactionDate: '2010-08-19',
+    lastTransactionDate: '2010-08-20',
+    lastUpdatedAt: '2026-08-12T14:31:52Z',
+    feesByCurrency: { USD: -0.9 },
+    ...overrides,
+  };
+}
+
+function setup(rows: ReportEntry[], status: IngestionStatus | null) {
+  TestBed.configureTestingModule({
+    imports: [KpiRow],
+    providers: [
+      { provide: ReportFilters, useValue: { rows: signal(rows) } },
+      { provide: IngestionStatusService, useValue: { status: signal(status) } },
+    ],
+  });
+}
+
+describe('KpiRow', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+
+  it('sums trade counts and counts pairs and distinct clients', async () => {
+    setup(
+      [
+        row({ tradeCount: 3 }),
+        row({ tradeCount: 4, Client_Information: 'CL123400030001' }),
+        row({ tradeCount: 5, Client_Information: 'CL123400030001', symbol: 'N1' }),
+      ],
+      null,
+    );
+    const fixture = TestBed.createComponent(KpiRow);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const text = fixture.nativeElement.textContent;
+    expect(fixture.nativeElement.querySelector('[data-testid="kpi-transactions"]').textContent)
+      .toContain('12');
+    expect(fixture.nativeElement.querySelector('[data-testid="kpi-pairs"]').textContent)
+      .toContain('3');
+    expect(fixture.nativeElement.querySelector('[data-testid="kpi-clients"]').textContent)
+      .toContain('2');
+    expect(text).toBeTruthy();
+  });
+
+  it('renders one figure per currency and never blends them', async () => {
+    setup(
+      [
+        row({ feesByCurrency: { USD: -0.9, JPY: -120 } }),
+        row({ feesByCurrency: { USD: -0.15 } }),
+      ],
+      null,
+    );
+    const fixture = TestBed.createComponent(KpiRow);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const fees = fixture.nativeElement.querySelector('[data-testid="kpi-fees"]').textContent;
+    expect(fees).toContain('USD');
+    expect(fees).toContain('-1.05');
+    expect(fees).toContain('JPY');
+    expect(fees).toContain('-120');
+  });
+
+  it('shows an em dash for fees when there are none', async () => {
+    setup([row({ feesByCurrency: {} })], null);
+    const fixture = TestBed.createComponent(KpiRow);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('[data-testid="kpi-fees"]').textContent)
+      .toContain('—');
+  });
+
+  it('warns when aggregated trades disagree with records published', async () => {
+    setup([row({ tradeCount: 700 })], {
+      configuredPath: 'sample-data/Input.txt',
+      fileExists: true,
+      fileSizeBytes: 127624,
+      fileLastModified: null,
+      lastIngestAt: '2026-08-12T14:31:52Z',
+      fingerprint: 'fp',
+      totalLines: 717,
+      published: 717,
+      skipped: 0,
+      errorCount: 0,
+    });
+    const fixture = TestBed.createComponent(KpiRow);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('[data-testid="reconcile-warning"]')).not.toBeNull();
+  });
+
+  it('does not warn when they agree', async () => {
+    setup([row({ tradeCount: 717 })], {
+      configuredPath: 'sample-data/Input.txt',
+      fileExists: true,
+      fileSizeBytes: 127624,
+      fileLastModified: null,
+      lastIngestAt: '2026-08-12T14:31:52Z',
+      fingerprint: 'fp',
+      totalLines: 717,
+      published: 717,
+      skipped: 0,
+      errorCount: 0,
+    });
+    const fixture = TestBed.createComponent(KpiRow);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('[data-testid="reconcile-warning"]')).toBeNull();
+  });
+
+  it('does not warn when the status endpoint is unavailable', async () => {
+    setup([row({ tradeCount: 3 })], null);
+    const fixture = TestBed.createComponent(KpiRow);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('[data-testid="reconcile-warning"]')).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `cd frontend && npx vitest run src/app/report/kpi-row.spec.ts`
+Expected: FAIL — cannot resolve `./kpi-row`.
+
+- [ ] **Step 3: Implement**
+
+Create `frontend/src/app/report/kpi-row.ts`:
+
+```ts
+import { Component, computed, inject } from '@angular/core';
+import { ReportFilters } from './report-filters';
+import { IngestionStatusService } from './ingestion-status.service';
+
+@Component({
+  selector: 'app-kpi-row',
+  template: `
+    <dl class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div class="rounded-lg border border-rule bg-surface-1 p-3" data-testid="kpi-transactions">
+        <dt class="text-xs uppercase tracking-wide text-ink-muted">Transactions</dt>
+        <dd class="mt-1 text-2xl text-ink-primary">{{ transactions() }}</dd>
+        @if (reconciliationMismatch()) {
+          <p
+            data-testid="reconcile-warning"
+            class="mt-1 text-xs text-status-critical"
+          >
+            ⚠ {{ published() }} published — {{ transactions() }} aggregated
+          </p>
+        }
+      </div>
+
+      <div class="rounded-lg border border-rule bg-surface-1 p-3" data-testid="kpi-pairs">
+        <dt class="text-xs uppercase tracking-wide text-ink-muted">Client/product pairs</dt>
+        <dd class="mt-1 text-2xl text-ink-primary">{{ filters.rows().length }}</dd>
+      </div>
+
+      <div class="rounded-lg border border-rule bg-surface-1 p-3" data-testid="kpi-clients">
+        <dt class="text-xs uppercase tracking-wide text-ink-muted">Distinct clients</dt>
+        <dd class="mt-1 text-2xl text-ink-primary">{{ distinctClients() }}</dd>
+      </div>
+
+      <div class="rounded-lg border border-rule bg-surface-1 p-3" data-testid="kpi-fees">
+        <dt class="text-xs uppercase tracking-wide text-ink-muted">Fees</dt>
+        <dd class="mt-1 text-sm text-ink-primary">
+          @if (feeEntries().length === 0) {
+            <span class="text-2xl">—</span>
+          } @else {
+            <!-- One figure per currency: two currencies are never added together. -->
+            @for (fee of feeEntries(); track fee.currency) {
+              <span class="tabular mr-3 whitespace-nowrap">
+                {{ fee.currency }} {{ fee.amount }}
+              </span>
+            }
+          }
+        </dd>
+      </div>
+    </dl>
+  `,
+})
+export class KpiRow {
+  protected readonly filters = inject(ReportFilters);
+  private readonly statusService = inject(IngestionStatusService);
+
+  protected readonly transactions = computed(() =>
+    this.filters.rows().reduce((total, row) => total + row.tradeCount, 0),
+  );
+
+  protected readonly distinctClients = computed(
+    () => new Set(this.filters.rows().map((row) => row.Client_Information)).size,
+  );
+
+  protected readonly published = computed(() => this.statusService.status()?.published ?? null);
+
+  /**
+   * A mismatch means records were lost between ingestion and aggregation. Only
+   * meaningful with no filters applied and a known published count, so it is
+   * suppressed otherwise rather than crying wolf.
+   */
+  protected readonly reconciliationMismatch = computed(() => {
+    const published = this.published();
+    if (published === null) return false;
+    return published !== this.transactions();
+  });
+
+  /** Totals per currency, in a stable order. Negative is expected: D = debit. */
+  protected readonly feeEntries = computed(() => {
+    const totals = new Map<string, number>();
+    for (const row of this.filters.rows()) {
+      for (const [currency, amount] of Object.entries(row.feesByCurrency)) {
+        totals.set(currency, (totals.get(currency) ?? 0) + amount);
+      }
+    }
+    return [...totals.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([currency, amount]) => ({
+        currency,
+        // toFixed(2) then strip a trailing ".00" so JPY reads -120, USD reads -1.05.
+        amount: amount.toFixed(2).replace(/\.00$/, ''),
+      }));
+  });
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `cd frontend && npx vitest run src/app/report/kpi-row.spec.ts`
+Expected: PASS — 6 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add frontend/src/app/report/kpi-row.ts frontend/src/app/report/kpi-row.spec.ts
+git commit -m "feat(frontend): add the KPI row with per-currency fees and a reconciliation check"
 ```
 
 ---
