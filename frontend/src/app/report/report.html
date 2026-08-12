@@ -1,49 +1,65 @@
-<h1>Daily Summary Report</h1>
+<div class="mx-auto max-w-7xl p-4 sm:p-6">
+  <header class="mb-5 flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-xl font-semibold text-ink-primary">Daily Summary Report</h1>
+      <p class="text-sm text-ink-secondary">
+        Net transaction quantity per client and product
+      </p>
+    </div>
+    <app-theme-toggle />
+  </header>
 
-@if (reportService.status() === 'loading') {
-  <p class="banner banner-loading">
-    Report is still being generated — Kafka Streams is starting up. This can take a
-    few moments.
-    @if (reportService.retryCount() > 10) {
-      <span data-testid="stuck-notice">
-        Still waiting after 30s — processing-service may not be healthy.
-      </span>
-    }
-  </p>
-}
-
-@if (reportService.status() === 'error') {
-  <p class="banner banner-error">
-    {{ reportService.errorMessage() }}
-  </p>
-  <button type="button" data-testid="retry" (click)="retry()">Retry</button>
-}
-
-@if (reportService.status() === 'ready') {
-  @if (reportService.entries().length === 0) {
-    <p class="banner banner-empty">No transactions recorded yet.</p>
-  } @else {
-    <table>
-      <thead>
-        <tr>
-          <th>Client_Information</th>
-          <th>Product_Information</th>
-          <th>Total_Transaction_Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (entry of reportService.entries(); track entry.Client_Information + entry.Product_Information) {
-          <tr>
-            <td>{{ entry.Client_Information }}</td>
-            <td>{{ entry.Product_Information }}</td>
-            <td>{{ entry.Total_Transaction_Amount }}</td>
-          </tr>
-        }
-      </tbody>
-    </table>
+  @if (reportService.status() === 'loading') {
+    <p class="rounded-lg border border-rule bg-surface-1 p-4 text-sm text-ink-secondary">
+      Report is still being generated — Kafka Streams is starting up. This can take a
+      few moments.
+      @if (reportService.retryCount() > 10) {
+        <span data-testid="stuck-notice" class="mt-1 block text-status-warning">
+          Still waiting after 30s — processing-service may not be healthy.
+        </span>
+      }
+    </p>
   }
-  <div class="actions">
-    <a data-testid="csv-download" href="/api/v1/report/csv" download>Download CSV</a>
-    <button type="button" data-testid="refresh" (click)="refresh()">Refresh</button>
-  </div>
-}
+
+  @if (reportService.status() === 'error') {
+    <div class="rounded-lg border border-status-critical/40 bg-status-critical/10 p-4">
+      <p class="text-sm text-ink-primary">{{ reportService.errorMessage() }}</p>
+      <button
+        type="button"
+        data-testid="retry"
+        class="mt-2 rounded border border-rule px-2 py-1 text-sm text-ink-secondary hover:text-ink-primary"
+        (click)="retry()"
+      >
+        Retry
+      </button>
+    </div>
+  }
+
+  @if (reportService.status() === 'ready') {
+    <div class="flex flex-col gap-5">
+      <app-source-file-panel />
+      <app-kpi-row />
+
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <app-filter-bar class="grow" />
+        <div class="flex items-center gap-3">
+          <app-refresh-control />
+          <app-column-picker />
+        </div>
+      </div>
+
+      <app-report-table />
+
+      <div>
+        <a
+          data-testid="csv-download"
+          href="/api/v1/report/csv"
+          download
+          class="inline-block rounded border border-rule px-3 py-1.5 text-sm text-ink-secondary hover:text-ink-primary"
+        >
+          Download CSV
+        </a>
+      </div>
+    </div>
+  }
+</div>

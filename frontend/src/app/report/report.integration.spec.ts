@@ -9,6 +9,7 @@ describe('Report + ReportService integration', () => {
   let httpMock: HttpTestingController;
 
   beforeEach(() => {
+    localStorage.clear();
     vi.useFakeTimers();
     TestBed.configureTestingModule({
       imports: [Report],
@@ -70,6 +71,20 @@ describe('Report + ReportService integration', () => {
     fixture.detectChanges();
     await fixture.whenStable();
 
+    // The shell also loads provenance on init; answer it so httpMock.verify() passes.
+    httpMock.expectOne('/api/v1/ingest/status').flush({
+      configuredPath: 'sample-data/Input.txt',
+      fileExists: true,
+      fileSizeBytes: 127624,
+      fileLastModified: '2026-08-12T09:14:00Z',
+      lastIngestAt: '2026-08-12T14:31:52Z',
+      fingerprint: 'fp-1',
+      totalLines: 717,
+      published: 717,
+      skipped: 0,
+      errorCount: 0,
+    });
+
     httpMock.expectOne('/api/v1/report').flush(
       { error: 'not ready' },
       { status: 503, statusText: 'Service Unavailable' },
@@ -90,7 +105,9 @@ describe('Report + ReportService integration', () => {
 
     const rows = fixture.nativeElement.querySelectorAll('tbody tr');
     expect(rows.length).toBe(2);
-    expect(rows[0].textContent).toContain('C1');
+    // Client_Information/Product_Information are Legacy columns, hidden by default;
+    // clientNumber is one of the columns actually shown, so assert on that instead.
+    expect(rows[0].textContent).toContain('4321');
 
     const csvLink: HTMLAnchorElement = fixture.nativeElement.querySelector(
       'a[data-testid="csv-download"]',
