@@ -62,8 +62,7 @@ per-currency fees. The frontend then renders a column-definition-driven table.
 | File | Responsibility |
 |---|---|
 | Modify `.../kafka/KafkaKeyBuilder.java` | Delegate to `ReportKey.from(tx).encode()`. |
-| Modify `.../IngestionRegistry.java` | Record `lastIngest` (only on actual compute). |
-| Create `.../ClockConfig.java` | `Clock` bean so the registry's timestamp is testable. |
+| Modify `.../IngestionRegistry.java` | Record `lastIngest` (only on actual compute); add a `Clock` constructor for tests alongside the existing no-arg one. |
 | Create `.../IngestionStatus.java` | Status response record. |
 | Create `.../IngestionStatusService.java` | Reads file metadata + registry's last ingest. |
 | Modify `.../IngestionController.java` | Add `GET /ingest/status`. |
@@ -1475,6 +1474,630 @@ git add processing-service/src/test/resources/Output.csv \
         processing-service/src/test/java/com/pfm/processing/FullPipelineGoldenTest.java \
         processing-service/README.md
 git commit -m "test(processing-service): lock CSV output to the committed fixture; document teardown"
+```
+
+---
+
+## Task 8: Record when an ingestion actually happened
+
+**Files:**
+- Modify: `ingestion-service/src/main/java/com/pfm/ingestion/IngestionRegistry.java`
+- Test: `ingestion-service/src/test/java/com/pfm/ingestion/IngestionRegistryTest.java`
+
+**Interfaces:**
+- Produces: `IngestionRegistry.LastIngest(Instant at, IngestionResult result)` record,
+  `IngestionRegistry.lastIngest() -> Optional<LastIngest>`, and a second
+  constructor `IngestionRegistry(Clock)`. Task 9 consumes `lastIngest()`.
+
+Nothing currently records *when* an ingestion ran. The critical behaviour: a
+**cache hit publishes nothing to Kafka, so it must not advance the timestamp** —
+otherwise the UI's file panel would claim fresh activity where none occurred.
+
+The existing no-arg constructor is retained (delegating to `Clock.systemUTC()`)
+so Spring keeps using it and the six existing `new IngestionRegistry()` call
+sites are untouched. The `Clock` constructor exists for deterministic tests.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `ingestion-service/src/test/java/com/pfm/ingestion/IngestionRegistryTest.java`:
+
+```java
+    @Test
+    void lastIngestIsEmptyBeforeAnythingHasBeenComputed() {
+        IngestionRegistry registry = new IngestionRegistry(Clock.fixed(T1, ZoneOffset.UTC));
+
+        assertTrue(registry.lastIngest().isEmpty());
+    }
+
+    @Test
+    void computingAnIngestionRecordsItsTimestampAndResult() {
+        IngestionRegistry registry = new IngestionRegistry(Clock.fixed(T1, ZoneOffset.UTC));
+        IngestionResult result = new IngestionResult("fp", 717, 717, 0, List.of(), false);
+
+        registry.getOrCompute("fp", () -> result);
+
+        IngestionRegistry.LastIngest last = registry.lastIngest().orElseThrow();
+        assertEquals(T1, last.at());
+        assertSame(result, last.result());
+    }
+
+    @Test
+    void aCacheHitDoesNotAdvanceTheLastIngestTimestamp() {
+        // A cache hit republishes nothing to Kafka, so reporting it as a fresh
+        // ingestion would tell the UI activity happened when none did.
+        MutableClock clock = new MutableClock(T1);
+        IngestionRegistry registry = new IngestionRegistry(clock);
+        IngestionResult result = new IngestionResult("fp", 717, 717, 0, List.of(), false);
+
+        registry.getOrCompute("fp", () -> result);
+        clock.set(T2);
+        IngestionRegistry.CacheOutcome second = registry.getOrCompute("fp", () -> result);
+
+        assertTrue(second.cached());
+        assertEquals(T1, registry.lastIngest().orElseThrow().at());
+    }
+
+    @Test
+    void forceComputeAdvancesTheLastIngestTimestamp() {
+        MutableClock clock = new MutableClock(T1);
+        IngestionRegistry registry = new IngestionRegistry(clock);
+
+        registry.getOrCompute("fp", () -> new IngestionResult("fp", 1, 1, 0, List.of(), false));
+        clock.set(T2);
+        registry.forceCompute("fp", () -> new IngestionResult("fp", 2, 2, 0, List.of(), false));
+
+        assertEquals(T2, registry.lastIngest().orElseThrow().at());
+        assertEquals(2, registry.lastIngest().orElseThrow().result().totalLines());
+    }
+
+    @Test
+    void anUncachedResultStillCountsAsAnIngestionThatHappened() {
+        // A batch with Kafka send failures is deliberately not cached, but records
+        // WERE published, so it must still be reported as the last ingestion.
+        MutableClock clock = new MutableClock(T1);
+        IngestionRegistry registry = new IngestionRegistry(clock);
+        IngestionResult withSendFailure = new IngestionResult("fp", 10, 4, 6,
+                List.of(new ParseError(-1, "key", "Kafka send failed")), false);
+
+        registry.getOrCompute("fp", () -> withSendFailure, result -> false);
+
+        assertEquals(T1, registry.lastIngest().orElseThrow().at());
+        assertEquals(4, registry.lastIngest().orElseThrow().result().published());
+    }
+```
+
+Add these constants and helper to the class, plus imports
+`java.time.Clock`, `java.time.Instant`, `java.time.ZoneId`, `java.time.ZoneOffset`:
+
+```java
+    private static final Instant T1 = Instant.parse("2026-08-12T14:31:52Z");
+    private static final Instant T2 = Instant.parse("2026-08-12T15:00:00Z");
+
+    /** A Clock whose instant can be moved, for asserting what does and does not re-stamp. */
+    private static final class MutableClock extends Clock {
+        private Instant now;
+
+        private MutableClock(Instant now) {
+            this.now = now;
+        }
+
+        private void set(Instant now) {
+            this.now = now;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+    }
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `mvn -q -pl ingestion-service -am test -Dtest=IngestionRegistryTest`
+Expected: FAIL — no `IngestionRegistry(Clock)` constructor, no `lastIngest()`.
+
+- [ ] **Step 3: Implement in `IngestionRegistry`**
+
+Add imports to `ingestion-service/src/main/java/com/pfm/ingestion/IngestionRegistry.java`:
+
+```java
+import java.time.Clock;
+import java.time.Instant;
+import java.util.Optional;
+```
+
+Add the record, field, constructors and accessor:
+
+```java
+    /** The most recent ingestion that actually ran, as opposed to one served from cache. */
+    public record LastIngest(Instant at, IngestionResult result) {
+    }
+
+    private final AtomicReference<LastIngest> lastIngest = new AtomicReference<>();
+    private final Clock clock;
+
+    public IngestionRegistry() {
+        this(Clock.systemUTC());
+    }
+
+    /** Test seam: lets a test pin or advance the timestamp deterministically. */
+    IngestionRegistry(Clock clock) {
+        this.clock = clock;
+    }
+
+    public Optional<LastIngest> lastIngest() {
+        return Optional.ofNullable(lastIngest.get());
+    }
+```
+
+In `getOrCompute(String, Supplier, Predicate)`, record the ingestion inside the
+mapping function — where a compute genuinely happened — right after
+`freshResult.set(result)`:
+
+```java
+        IngestionResult cached = cache.computeIfAbsent(fingerprint, fp -> {
+            computed.set(true);
+            IngestionResult result = computation.get();
+            freshResult.set(result);
+            // Records WERE published here even if the result is judged uncacheable,
+            // so this counts as an ingestion that happened.
+            lastIngest.set(new LastIngest(clock.instant(), result));
+            // Returning null from a computeIfAbsent mapping function stores nothing,
+            // leaving the key absent so the next call recomputes.
+            return shouldCache.test(result) ? result : null;
+        });
+```
+
+In `forceCompute`, record it too:
+
+```java
+    public IngestionResult forceCompute(String fingerprint, Supplier<IngestionResult> computation) {
+        IngestionResult result = computation.get();
+        lastIngest.set(new LastIngest(clock.instant(), result));
+        cache.put(fingerprint, result);
+        return result;
+    }
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `mvn -q -pl ingestion-service -am test -Dtest=IngestionRegistryTest`
+Expected: PASS — the 5 new tests plus all pre-existing ones, unchanged.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add ingestion-service/src/main/java/com/pfm/ingestion/IngestionRegistry.java \
+        ingestion-service/src/test/java/com/pfm/ingestion/IngestionRegistryTest.java
+git commit -m "feat(ingestion-service): track the last ingestion that actually ran"
+```
+
+---
+
+## Task 9: `GET /api/v1/ingest/status`
+
+**Files:**
+- Create: `ingestion-service/src/main/java/com/pfm/ingestion/IngestionStatus.java`
+- Create: `ingestion-service/src/main/java/com/pfm/ingestion/IngestionStatusService.java`
+- Modify: `ingestion-service/src/main/java/com/pfm/ingestion/IngestionController.java`
+- Test: `ingestion-service/src/test/java/com/pfm/ingestion/IngestionStatusServiceTest.java`
+
+**Interfaces:**
+- Consumes: `IngestionRegistry.lastIngest()` (Task 8), `IngestionProperties.filePath()`.
+- Produces: `IngestionStatus` record and
+  `IngestionStatusService.currentStatus() -> IngestionStatus`; HTTP
+  `GET /api/v1/ingest/status`. The frontend's `IngestionStatus` TS interface
+  (Task 15) mirrors this shape field-for-field.
+
+**Always returns 200.** "Never ingested" is a normal state expressed as null
+run-fields, not an error. **`configuredPath` is the raw config value**, never
+`path.toAbsolutePath()` — `IngestionController` deliberately strips absolute
+paths from responses and this must not regress that.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `ingestion-service/src/test/java/com/pfm/ingestion/IngestionStatusServiceTest.java`:
+
+```java
+package com.pfm.ingestion;
+
+import com.pfm.common.fixedwidth.ParseError;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class IngestionStatusServiceTest {
+
+    private static final Instant T1 = Instant.parse("2026-08-12T14:31:52Z");
+
+    @Test
+    void reportsFileMetadataAndNullRunFieldsBeforeAnyIngestion(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("Input.txt");
+        Files.writeString(file, "some content", StandardCharsets.UTF_8);
+        IngestionStatusService service = new IngestionStatusService(
+                new IngestionProperties(file.toString(), "future-transactions"),
+                new IngestionRegistry(Clock.fixed(T1, ZoneOffset.UTC)));
+
+        IngestionStatus status = service.currentStatus();
+
+        assertTrue(status.fileExists());
+        assertEquals(12L, status.fileSizeBytes());
+        assertEquals(Files.getLastModifiedTime(file).toInstant(), status.fileLastModified());
+        // Never ingested is a normal state, not an error.
+        assertNull(status.lastIngestAt());
+        assertNull(status.fingerprint());
+        assertNull(status.totalLines());
+        assertNull(status.published());
+        assertNull(status.skipped());
+        assertNull(status.errorCount());
+    }
+
+    @Test
+    void reportsTheConfiguredPathVerbatimAndNotAnAbsolutePath() {
+        // The controller strips absolute paths from error responses to avoid
+        // advertising container filesystem layout; this endpoint honours that.
+        IngestionStatusService service = new IngestionStatusService(
+                new IngestionProperties("sample-data/Input.txt", "future-transactions"),
+                new IngestionRegistry(Clock.fixed(T1, ZoneOffset.UTC)));
+
+        assertEquals("sample-data/Input.txt", service.currentStatus().configuredPath());
+    }
+
+    @Test
+    void reportsFileAbsentWithoutFailingWhenThePathDoesNotExist(@TempDir Path dir) {
+        IngestionStatusService service = new IngestionStatusService(
+                new IngestionProperties(dir.resolve("nope.txt").toString(), "future-transactions"),
+                new IngestionRegistry(Clock.fixed(T1, ZoneOffset.UTC)));
+
+        IngestionStatus status = service.currentStatus();
+
+        assertFalse(status.fileExists());
+        assertNull(status.fileSizeBytes());
+        assertNull(status.fileLastModified());
+    }
+
+    @Test
+    void reportsCountsAndTimestampAfterAnIngestion(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("Input.txt");
+        Files.writeString(file, "x", StandardCharsets.UTF_8);
+        IngestionRegistry registry = new IngestionRegistry(Clock.fixed(T1, ZoneOffset.UTC));
+        registry.getOrCompute("fp-1", () -> new IngestionResult("fp-1", 717, 715, 2,
+                List.of(new ParseError(3, "bad line", "not numeric")), false));
+
+        IngestionStatus status = new IngestionStatusService(
+                new IngestionProperties(file.toString(), "future-transactions"), registry).currentStatus();
+
+        assertEquals(T1, status.lastIngestAt());
+        assertEquals("fp-1", status.fingerprint());
+        assertEquals(717, status.totalLines());
+        assertEquals(715, status.published());
+        assertEquals(2, status.skipped());
+        // The count only — raw lines contain client data and are never exposed.
+        assertEquals(1, status.errorCount());
+    }
+}
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `mvn -q -pl ingestion-service -am test -Dtest=IngestionStatusServiceTest`
+Expected: FAIL — `cannot find symbol: class IngestionStatusService`.
+
+- [ ] **Step 3: Create the response record**
+
+Create `ingestion-service/src/main/java/com/pfm/ingestion/IngestionStatus.java`:
+
+```java
+package com.pfm.ingestion;
+
+import java.time.Instant;
+
+/**
+ * Provenance for the file the report is built from.
+ *
+ * <p>{@code configuredPath} is the {@code ingestion.file-path} config value as
+ * written, deliberately not the resolved absolute path — it is what an operator
+ * wants to verify and it discloses nothing about the container's filesystem.
+ *
+ * <p>All run fields are null until an ingestion has actually happened; that is a
+ * normal state, not an error, and the endpoint still returns 200.
+ */
+public record IngestionStatus(
+        String configuredPath,
+        boolean fileExists,
+        Long fileSizeBytes,
+        Instant fileLastModified,
+        Instant lastIngestAt,
+        String fingerprint,
+        Integer totalLines,
+        Integer published,
+        Integer skipped,
+        Integer errorCount) {
+}
+```
+
+- [ ] **Step 4: Create the service**
+
+Create `ingestion-service/src/main/java/com/pfm/ingestion/IngestionStatusService.java`:
+
+```java
+package com.pfm.ingestion;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Optional;
+
+@Service
+public class IngestionStatusService {
+
+    private static final Logger log = LoggerFactory.getLogger(IngestionStatusService.class);
+
+    private final IngestionProperties properties;
+    private final IngestionRegistry registry;
+
+    public IngestionStatusService(IngestionProperties properties, IngestionRegistry registry) {
+        this.properties = properties;
+        this.registry = registry;
+    }
+
+    public IngestionStatus currentStatus() {
+        Path path = Path.of(properties.filePath());
+        boolean exists = Files.exists(path);
+
+        Long sizeBytes = null;
+        Instant lastModified = null;
+        if (exists) {
+            try {
+                sizeBytes = Files.size(path);
+                lastModified = Files.getLastModifiedTime(path).toInstant();
+            } catch (IOException e) {
+                // Readable-then-unreadable is a race, not a client error: report the
+                // file as present with unknown metadata rather than failing the call.
+                log.warn("Could not read metadata for ingestion file: {}", e.getMessage());
+            }
+        }
+
+        Optional<IngestionRegistry.LastIngest> last = registry.lastIngest();
+        return new IngestionStatus(
+                properties.filePath(),
+                exists,
+                sizeBytes,
+                lastModified,
+                last.map(IngestionRegistry.LastIngest::at).orElse(null),
+                last.map(l -> l.result().fingerprint()).orElse(null),
+                last.map(l -> l.result().totalLines()).orElse(null),
+                last.map(l -> l.result().published()).orElse(null),
+                last.map(l -> l.result().skipped()).orElse(null),
+                last.map(l -> l.result().errors().size()).orElse(null));
+    }
+}
+```
+
+- [ ] **Step 5: Run the test to verify it passes**
+
+Run: `mvn -q -pl ingestion-service -am test -Dtest=IngestionStatusServiceTest`
+Expected: PASS — 4 tests.
+
+- [ ] **Step 6: Wire up the endpoint**
+
+In `ingestion-service/src/main/java/com/pfm/ingestion/IngestionController.java`,
+add the status service to the constructor and add the mapping:
+
+```java
+    private final IngestionService ingestionService;
+    private final IngestionStatusService statusService;
+
+    public IngestionController(IngestionService ingestionService, IngestionStatusService statusService) {
+        this.ingestionService = ingestionService;
+        this.statusService = statusService;
+    }
+
+    @GetMapping("/ingest/status")
+    public IngestionStatus status() {
+        return statusService.currentStatus();
+    }
+```
+
+The wildcard import `org.springframework.web.bind.annotation.*` already covers
+`@GetMapping`.
+
+- [ ] **Step 7: Add a controller test**
+
+Append to `ingestion-service/src/test/java/com/pfm/ingestion/IngestionControllerTest.java`
+(match the file's existing MockMvc/mocking style — if it uses
+`@WebMvcTest`, add `IngestionStatusService` as a `@MockitoBean`):
+
+```java
+    @Test
+    void statusEndpointReturns200WithTheConfiguredPath() throws Exception {
+        when(statusService.currentStatus()).thenReturn(new IngestionStatus(
+                "sample-data/Input.txt", true, 127624L,
+                Instant.parse("2026-08-12T09:14:00Z"),
+                Instant.parse("2026-08-12T14:31:52Z"), "fp-1", 717, 717, 0, 0));
+
+        mockMvc.perform(get("/api/v1/ingest/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.configuredPath").value("sample-data/Input.txt"))
+                .andExpect(jsonPath("$.published").value(717));
+    }
+```
+
+- [ ] **Step 8: Run the full ingestion suite**
+
+Run: `mvn -q -pl ingestion-service -am test`
+Expected: PASS.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add ingestion-service/src/main/java/com/pfm/ingestion/IngestionStatus.java \
+        ingestion-service/src/main/java/com/pfm/ingestion/IngestionStatusService.java \
+        ingestion-service/src/main/java/com/pfm/ingestion/IngestionController.java \
+        ingestion-service/src/test/java/com/pfm/ingestion/
+git commit -m "feat(ingestion-service): expose read-only file provenance at GET /ingest/status"
+```
+
+---
+
+## Task 10: Route only the status endpoint to ingestion-service
+
+**Files:**
+- Modify: `frontend/nginx.conf.template`
+- Modify: `frontend/Dockerfile`
+- Modify: `frontend/proxy.conf.json`
+- Modify: `docker-compose.yml`
+- Modify: `k8s/frontend.yaml`
+
+**Interfaces:**
+- Consumes: `GET /api/v1/ingest/status` (Task 9).
+- Produces: browser-reachable `/api/v1/ingest/status`. Task 15's
+  `IngestionStatusService` (Angular) calls this path.
+
+**Read-only is enforced by the route shape, not by a rule.** `location =` is an
+*exact* match, so `POST /api/v1/ingest` does not match it, falls through to the
+`/api/` prefix location → processing-service, and 404s. Nobody can forget to
+enforce this later.
+
+- [ ] **Step 1: Add the exact-match location to nginx**
+
+Edit `frontend/nginx.conf.template` — the new block goes **before** `location /api/`:
+
+```nginx
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+    index index.html;
+    resolver ${NGINX_LOCAL_RESOLVERS};
+
+    # Exact match, deliberately: POST /api/v1/ingest does NOT match this location,
+    # so it falls through to /api/ -> processing-service and 404s. The UI is a
+    # viewer and cannot trigger ingestion, enforced by routing rather than policy.
+    location = /api/v1/ingest/status {
+        set $ingestion ${INGESTION_SERVICE_UPSTREAM};
+        proxy_pass $ingestion;
+        proxy_set_header Host $host;
+    }
+
+    location /api/ {
+        set $upstream ${PROCESSING_SERVICE_UPSTREAM};
+        proxy_pass $upstream;
+        proxy_set_header Host $host;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+- [ ] **Step 2: Add the variable to the Dockerfile's `envsubst` list**
+
+In `frontend/Dockerfile`, find the `envsubst` invocation and add
+`${INGESTION_SERVICE_UPSTREAM}` to its variable list alongside
+`${PROCESSING_SERVICE_UPSTREAM}` and `${NGINX_LOCAL_RESOLVERS}`. If the list is
+passed as a single quoted string, it becomes e.g.
+`'${PROCESSING_SERVICE_UPSTREAM} ${INGESTION_SERVICE_UPSTREAM} ${NGINX_LOCAL_RESOLVERS}'`.
+
+Getting this wrong is silent: `envsubst` leaves the literal `${...}` in place and
+nginx fails to start with an invalid `proxy_pass`. Step 6 catches it.
+
+- [ ] **Step 3: Set the variable in docker-compose**
+
+In `docker-compose.yml`, under the `frontend` service's `environment:` block, add:
+
+```yaml
+      INGESTION_SERVICE_UPSTREAM: http://ingestion-service:8081
+```
+
+- [ ] **Step 4: Set the variable in the k8s deployment**
+
+In `k8s/frontend.yaml`, alongside the existing `PROCESSING_SERVICE_UPSTREAM` env
+entry on the container:
+
+```yaml
+            - name: INGESTION_SERVICE_UPSTREAM
+              value: http://ingestion-service:8081
+```
+
+- [ ] **Step 5: Add the dev-server proxy entry**
+
+Replace `frontend/proxy.conf.json`. The more specific key must come first:
+
+```json
+{
+  "/api/v1/ingest": {
+    "target": "http://localhost:8081",
+    "secure": false
+  },
+  "/api": {
+    "target": "http://localhost:8082",
+    "secure": false
+  }
+}
+```
+
+- [ ] **Step 6: Verify routing end to end**
+
+```bash
+docker compose down -v --remove-orphans
+docker compose up -d --build
+curl -X POST http://localhost:8081/api/v1/ingest
+```
+
+Then check all three behaviours through the frontend origin:
+
+```bash
+# Reaches ingestion-service: expect 200 and a configuredPath field
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/api/v1/ingest/status
+curl -s http://localhost:8080/api/v1/ingest/status
+
+# Still reaches processing-service
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/api/v1/report
+
+# Must be 404 -- exact-match means this never reaches ingestion-service
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:8080/api/v1/ingest
+```
+
+Expected: `200`, a JSON body containing `"configuredPath":"sample-data/Input.txt"`,
+`200`, then `404`. If nginx failed to start, `docker compose logs frontend` will
+show an unresolved `${INGESTION_SERVICE_UPSTREAM}` — revisit Step 2.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add frontend/nginx.conf.template frontend/Dockerfile frontend/proxy.conf.json \
+        docker-compose.yml k8s/frontend.yaml
+git commit -m "feat(frontend): route GET /api/v1/ingest/status to ingestion-service only"
 ```
 
 ---
