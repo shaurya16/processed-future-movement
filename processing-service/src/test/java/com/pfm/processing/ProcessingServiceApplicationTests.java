@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "spring.kafka.streams.auto-startup=false")
+        properties = {"spring.kafka.streams.auto-startup=false", "processing.topic=future-transactions"})
 class ProcessingServiceApplicationTests {
 
     @Autowired
