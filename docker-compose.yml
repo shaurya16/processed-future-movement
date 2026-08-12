@@ -56,7 +56,7 @@ services:
       - sh
       - -c
       - |
-        until /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:19092 --list | grep -qx "$$PFM_TOPIC"; do
+        until /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:19092 --list | grep -qxF "$$PFM_TOPIC"; do
           echo "waiting for $$PFM_TOPIC topic..."
           sleep 2
         done

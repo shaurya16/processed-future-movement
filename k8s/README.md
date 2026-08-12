@@ -37,7 +37,11 @@ future-transactions topic..." line versus signs Kafka never came up.
 The topic name is defined once, in `k8s/01-topic-config.yaml`'s
 `pfm-topic-config` ConfigMap, and referenced by `ingestion-service`,
 `processing-service`, and this init container via a `PFM_TOPIC` env var —
-not hardcoded per-manifest.
+not hardcoded per-manifest. Because it's consumed via `env`/`configMapKeyRef`
+rather than a mounted volume, editing `k8s/01-topic-config.yaml` and re-applying
+has no effect on already-running pods until they're restarted — run
+`kubectl rollout restart deploy/ingestion-service deploy/processing-service -n pfm`
+to pick up the change.
 
 `ingestion-service` has no equivalent init container guarding it against a not-yet-ready
 Kafka broker on a cold `kubectl apply -f k8s/`. This was deliberately not added: its
