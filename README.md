@@ -43,7 +43,7 @@ docker compose up -d --build
 Then publish the sample data and open the UI at `http://localhost:8080`:
 
 ```bash
-curl -X POST http://localhost:8081/api/ingest
+curl -X POST http://localhost:8081/api/v1/ingest
 ```
 
 `processing-service` waits for the `future-transactions` topic to exist before starting,
@@ -74,13 +74,13 @@ expected result is visible without running anything.
 ## Status
 
 - `common` — done: fixed-width parser + domain model.
-- `ingestion-service` — done: `POST /api/ingest` reads the file and publishes to Kafka
+- `ingestion-service` — done: `POST /api/v1/ingest` reads the file and publishes to Kafka
   (JSON, keyed by client+product, idempotent per file version, each record carrying a
   content-derived `transactionId` header for downstream dedup). See its
   [README](ingestion-service/README.md) for usage.
 - `processing-service` — done: Kafka Streams consumer dedupes on `transactionId` and
   maintains a running per-(client, product) net-quantity aggregate, exposed via
-  `GET /api/report` and `GET /api/report/csv`. See its
+  `GET /api/v1/report` and `GET /api/v1/report/csv`. See its
   [README](processing-service/README.md) for usage.
 - `frontend` — done: Angular UI displays the daily summary report and downloads it as
   CSV, distinguishing "store not ready" (`503`, auto-retries) from "zero rows so far"

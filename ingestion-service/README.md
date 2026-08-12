@@ -33,14 +33,14 @@ required unless you `cd` into `ingestion-service` first and the file happens to 
 In a separate terminal, once the service is up:
 
 ```bash
-curl -X POST http://localhost:8081/api/ingest
+curl -X POST http://localhost:8081/api/v1/ingest
 ```
 
 ## API
 
-- `POST /api/ingest` — parses the configured file and publishes each record to Kafka.
+- `POST /api/v1/ingest` — parses the configured file and publishes each record to Kafka.
   Returns a JSON body: `{fingerprint, totalLines, published, skipped, errors, cached}`.
   Calling it again for the same (unchanged) file returns the cached result without
   republishing (`cached: true`).
-- `POST /api/ingest?force=true` — bypasses the cache and republishes even if this exact
+- `POST /api/v1/ingest?force=true` — bypasses the cache and republishes even if this exact
   file was already ingested.
