@@ -74,8 +74,46 @@ describe('Report', () => {
 
   it('renders the table and CSV link when ready with data', async () => {
     const sample: ReportEntry[] = [
-      { Client_Information: 'C1', Product_Information: 'P1', Total_Transaction_Amount: 42 },
-      { Client_Information: 'C2', Product_Information: 'P2', Total_Transaction_Amount: -7 },
+      {
+        Client_Information: 'C1',
+        Product_Information: 'P1',
+        Total_Transaction_Amount: 42,
+        clientType: 'CL',
+        clientNumber: '4321',
+        accountNumber: '0002',
+        subaccountNumber: '0001',
+        exchangeCode: 'SGX',
+        productGroupCode: 'FU',
+        symbol: 'NK',
+        expirationDate: '2010-09-10',
+        grossLong: 42,
+        grossShort: 0,
+        tradeCount: 3,
+        firstTransactionDate: '2010-08-19',
+        lastTransactionDate: '2010-08-20',
+        lastUpdatedAt: '2026-08-12T14:31:52Z',
+        feesByCurrency: { USD: -0.9 },
+      },
+      {
+        Client_Information: 'C2',
+        Product_Information: 'P2',
+        Total_Transaction_Amount: -7,
+        clientType: 'CL',
+        clientNumber: '4322',
+        accountNumber: '0003',
+        subaccountNumber: '0001',
+        exchangeCode: 'SGX',
+        productGroupCode: 'FU',
+        symbol: 'N1',
+        expirationDate: '2010-09-10',
+        grossLong: 0,
+        grossShort: 7,
+        tradeCount: 1,
+        firstTransactionDate: '2010-08-19',
+        lastTransactionDate: '2010-08-20',
+        lastUpdatedAt: '2026-08-12T14:31:52Z',
+        feesByCurrency: { USD: -0.2 },
+      },
     ];
     const stub = makeStubService({ status: 'ready', entries: sample });
     TestBed.configureTestingModule({
