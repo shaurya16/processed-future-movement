@@ -14,14 +14,21 @@ public class IngestionController {
     private static final Logger log = LoggerFactory.getLogger(IngestionController.class);
 
     private final IngestionService ingestionService;
+    private final IngestionStatusService statusService;
 
-    public IngestionController(IngestionService ingestionService) {
+    public IngestionController(IngestionService ingestionService, IngestionStatusService statusService) {
         this.ingestionService = ingestionService;
+        this.statusService = statusService;
     }
 
     @PostMapping("/ingest")
     public IngestionResult ingest(@RequestParam(name = "force", defaultValue = "false") boolean force) {
         return ingestionService.ingest(force);
+    }
+
+    @GetMapping("/ingest/status")
+    public IngestionStatus status() {
+        return statusService.currentStatus();
     }
 
     @ExceptionHandler(KafkaPublishException.class)

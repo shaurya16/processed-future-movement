@@ -8,10 +8,12 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -24,6 +26,9 @@ class IngestionControllerTest {
 
     @MockitoBean
     IngestionService ingestionService;
+
+    @MockitoBean
+    IngestionStatusService statusService;
 
     @Test
     void postIngestReturnsResultFromService() throws Exception {
@@ -71,5 +76,18 @@ class IngestionControllerTest {
                 .andExpect(jsonPath("$.error").value("Ingestion file not found"))
                 .andExpect(jsonPath("$.error", org.hamcrest.Matchers.not(
                         org.hamcrest.Matchers.containsString("/some/deep/absolute/missing.txt"))));
+    }
+
+    @Test
+    void statusEndpointReturns200WithTheConfiguredPath() throws Exception {
+        when(statusService.currentStatus()).thenReturn(new IngestionStatus(
+                "sample-data/Input.txt", true, 127624L,
+                Instant.parse("2026-08-12T09:14:00Z"),
+                Instant.parse("2026-08-12T14:31:52Z"), "fp-1", 717, 717, 0, 0));
+
+        mockMvc.perform(get("/api/v1/ingest/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.configuredPath").value("sample-data/Input.txt"))
+                .andExpect(jsonPath("$.published").value(717));
     }
 }
