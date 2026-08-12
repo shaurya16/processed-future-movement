@@ -106,13 +106,32 @@ echo "$PFM_TOPIC topic found, starting processing-service"
 
 ## Testing
 
-No test changes. `FullPipelineGoldenTest` and every other existing test
-(`IngestionServiceTest`, `KafkaConfigTest`, `ProcessingEndToEndTest`,
-`AggregationTopologyTest`, `TransactionSerdeTest`) set `ingestion.topic` /
-`processing.topic` as explicit Spring properties or use `"future-transactions"`
-as their own literal test fixture — none of them go through the `PFM_TOPIC`
-env var or `application.yml`'s default, so removing the default doesn't
-affect them.
+`FullPipelineGoldenTest` and the pure-unit tests (`IngestionServiceTest`,
+`KafkaConfigTest`'s topic-content assertion, `AggregationTopologyTest`,
+`TransactionSerdeTest`) already set `ingestion.topic` / `processing.topic`
+explicitly or use `"future-transactions"` as their own literal fixture —
+unaffected by removing `application.yml`'s default.
+
+However, five `@SpringBootTest` classes boot the full Spring context off the
+unmodified classpath `application.yml` and currently rely on its default
+silently supplying the topic — they don't set `ingestion.topic` /
+`processing.topic` themselves:
+
+- `ingestion-service`: `IngestionServiceApplicationTests`, `KafkaConfigTest`,
+  `IngestionEndToEndTest`
+- `processing-service`: `ProcessingServiceApplicationTests`,
+  `ProcessingEndToEndTest`
+
+Once the default is removed, these fail context startup (unresolved
+`${PFM_TOPIC}` placeholder) unless `PFM_TOPIC` happens to be set in the
+`mvn test` environment. Rather than depend on that, each test gets the topic
+added to its existing explicit property mechanism — `properties = {...}` for
+`IngestionServiceApplicationTests`, `KafkaConfigTest`, and
+`ProcessingServiceApplicationTests`; a `registry.add(...)` line in the
+existing `@DynamicPropertySource` method for `IngestionEndToEndTest` and
+`ProcessingEndToEndTest`. This makes each test's dependency on the topic
+name explicit rather than implicit, consistent with how
+`FullPipelineGoldenTest` already does it.
 
 ### Manual verification
 
