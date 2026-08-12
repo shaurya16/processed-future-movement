@@ -27,3 +27,34 @@ own README) and this service has been running long enough to consume them:
 curl http://localhost:8082/api/v1/report
 curl http://localhost:8082/api/v1/report/csv
 ```
+
+## Upgrading past the ReportKey change
+
+The Kafka message key changed from two concatenated fields to all eight
+(`ReportKey`), and the `net-quantity-store` value changed from a `Long` to a
+`NetPosition`. Neither the store name nor the `application-id` was renamed —
+a version baked into an identifier outlives the migration that caused it — so
+existing state must be discarded rather than migrated.
+
+No deployment path in this repo persists state, so in practice there is nothing
+to clean up: `docker-compose.yml` declares no volumes at all, and
+`k8s/kafka.yaml` uses `emptyDir: {}` with no `volumeMounts` on
+processing-service. Both are pod/container-lifetime only.
+
+The one exception is the broker-only development loop (`docker compose up -d
+kafka` with the services run via Maven), where Kafka Streams keeps RocksDB state
+on the **host**:
+
+```bash
+docker compose down -v                                    # containerised paths
+rm -rf "${TMPDIR:-/tmp}/kafka-streams/processing-service"  # broker-only loop, host-side state
+```
+
+`${TMPDIR:-/tmp}` matters: Kafka Streams derives `state.dir` from `java.io.tmpdir`,
+which is `/tmp` on Linux but a per-user `/var/folders/.../T/` on macOS. A
+hardcoded `/tmp/kafka-streams` silently no-ops on macOS — the exact machine where
+the broker-only loop runs.
+
+Kafka Streams defaults `auto.offset.reset` to `earliest` (unlike a plain
+consumer, which defaults to `latest`), so after teardown the topic replays from
+the beginning and the store rebuilds with the new key format automatically.
