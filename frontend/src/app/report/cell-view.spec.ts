@@ -68,8 +68,6 @@ describe('barGeometry', () => {
 });
 
 describe('changedKeys', () => {
-  const key = (r: { c: string; p: string }) => r.c + '|' + r.p;
-
   it('reports nothing on the first snapshot', () => {
     // Everything is "new" initially; flashing every row on load would be noise.
     const rows = [{ k: 'a', updated: 't1' }];
