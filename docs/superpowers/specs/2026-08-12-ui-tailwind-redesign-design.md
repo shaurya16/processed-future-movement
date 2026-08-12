@@ -194,7 +194,7 @@ because **no deployment path in this repo persists state**:
 |---|---|---|
 | `docker compose` | no volumes declared at all — removed by `down` | container filesystem — removed by `down` |
 | `k8s` | `emptyDir: {}` in `kafka.yaml` — pod-lifetime only | no `volumeMounts` on processing-service — pod-lifetime only |
-| broker-only (`up -d kafka` + Maven) | container — removed by `down` | **on the host**, default `/tmp/kafka-streams/processing-service` |
+| broker-only (`up -d kafka` + Maven) | container — removed by `down` | **on the host**, at `${TMPDIR:-/tmp}/kafka-streams/processing-service` |
 
 So the incompatible-changelog scenario cannot arise in the containerised paths;
 there is nothing to orphan. Only the broker-only development loop leaves state
@@ -203,9 +203,13 @@ behind, because RocksDB then lives on the host rather than in a container.
 `processing-service/README.md` gains a teardown note covering both:
 
 ```bash
-docker compose down -v                        # containerised paths
-rm -rf /tmp/kafka-streams/processing-service   # broker-only loop, host-side state
+docker compose down -v                                    # containerised paths
+rm -rf "${TMPDIR:-/tmp}/kafka-streams/processing-service"  # broker-only loop, host-side state
 ```
+
+`${TMPDIR:-/tmp}` is load-bearing: Kafka Streams derives `state.dir` from
+`java.io.tmpdir`, which is `/tmp` on Linux but a per-user `/var/folders/.../T/`
+on macOS, so a hardcoded `/tmp/kafka-streams` silently no-ops there.
 
 Kafka Streams defaults `auto.offset.reset` to `earliest` (unlike a plain
 consumer, which defaults to `latest`) and nothing overrides it in
@@ -557,7 +561,7 @@ region and the page body never scrolls horizontally. The table header is sticky.
   and off, the fee tile's per-currency figures, the "as of trade date" expiry
   wording, and that the downloaded CSV matches `sample-output/Output.csv`.
 - Confirm `POST /api/v1/ingest` through the frontend origin returns 404.
-- For the broker-only loop, confirm `rm -rf /tmp/kafka-streams/processing-service`
+- For the broker-only loop, confirm `rm -rf "${TMPDIR:-/tmp}/kafka-streams/processing-service"`
   is required and sufficient: without it, a store built by the pre-change code
   fails to restore; with it, the store rebuilds cleanly.
 
