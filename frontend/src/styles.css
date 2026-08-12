@@ -1,1 +1,98 @@
-/* You can add global styles to this file, and also import other style files */
+@import "tailwindcss";
+
+/*
+ * Colour tokens from the dataviz reference palette, validated with
+ * scripts/validate_palette.js: the diverging pair clears every check in both
+ * modes (worst-pair CVD ΔE 21.6 protan light / 19.2 dark against a >=8 target).
+ * Do not swap these hexes without re-running that validator.
+ *
+ * Net quantity is polarity data -- net long vs net short around a zero baseline --
+ * so its colour job is diverging (blue <-> red, neutral gray midpoint), not
+ * categorical and not sequential.
+ */
+:root {
+  color-scheme: light;
+  --surface-1: #fcfcfb;
+  --surface-page: #f9f9f7;
+  --ink-primary: #0b0b0b;
+  --ink-secondary: #52514e;
+  --ink-muted: #898781;
+  --rule: #e1e0d9;
+  --net-long: #2a78d6;
+  --net-short: #e34948;
+  --net-flat: #f0efec;
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-critical: #d03b3b;
+}
+
+/* OS preference, but an explicit light choice must still win. */
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --surface-page: #0d0d0d;
+    --ink-primary: #ffffff;
+    --ink-secondary: #c3c2b7;
+    --ink-muted: #898781;
+    --rule: #2c2c2a;
+    --net-long: #3987e5;
+    --net-short: #e66767;
+    --net-flat: #383835;
+  }
+}
+
+/* Explicit dark choice must beat OS-light. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1: #1a1a19;
+  --surface-page: #0d0d0d;
+  --ink-primary: #ffffff;
+  --ink-secondary: #c3c2b7;
+  --ink-muted: #898781;
+  --rule: #2c2c2a;
+  --net-long: #3987e5;
+  --net-short: #e66767;
+  --net-flat: #383835;
+}
+
+/*
+ * @theme inline (not plain @theme) so the generated utilities REFERENCE the
+ * custom properties rather than inlining their values -- required for the
+ * light/dark swap above to take effect on utility classes.
+ */
+@theme inline {
+  --color-surface-1: var(--surface-1);
+  --color-surface-page: var(--surface-page);
+  --color-ink-primary: var(--ink-primary);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-rule: var(--rule);
+  --color-net-long: var(--net-long);
+  --color-net-short: var(--net-short);
+  --color-net-flat: var(--net-flat);
+  --color-status-good: var(--status-good);
+  --color-status-warning: var(--status-warning);
+  --color-status-critical: var(--status-critical);
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  background: var(--surface-page);
+  color: var(--ink-primary);
+  font-family: var(--font-sans);
+}
+
+/* Columns of figures must align vertically; standalone display numbers need not. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
