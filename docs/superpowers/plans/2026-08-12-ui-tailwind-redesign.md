@@ -5053,3 +5053,442 @@ git commit -m "feat(frontend): add the KPI row with per-currency fees and a reco
 ```
 
 ---
+
+## Task 19: Compose the shell and verify end to end
+
+**Files:**
+- Modify: `frontend/src/app/report/report.ts`
+- Modify: `frontend/src/app/report/report.html`
+- Delete: `frontend/src/app/report/report.css`
+- Modify: `frontend/src/app/report/report.spec.ts`
+- Modify: `frontend/src/app/report/report.integration.spec.ts`
+- Modify: `frontend/src/index.html`
+- Modify: `README.md`, `frontend/README.md`
+
+**Interfaces:**
+- Consumes: every component from Tasks 11, 15, 16, 17, 18.
+- Produces: the assembled page. Nothing downstream.
+
+`report.css` is deleted because every rule in it is now a Tailwind utility;
+leaving it would mean two sources of truth for the same styling.
+
+**Layout order:** header (title, theme toggle) → source-file panel → KPI row →
+filter bar with column picker and refresh control → table → CSV download.
+
+- [ ] **Step 1: Rewrite the shell component**
+
+Replace `frontend/src/app/report/report.ts`:
+
+```ts
+import { Component, OnInit, inject } from '@angular/core';
+import { ReportService } from './report.service';
+import { IngestionStatusService } from './ingestion-status.service';
+import { SourceFilePanel } from './source-file-panel';
+import { KpiRow } from './kpi-row';
+import { FilterBar } from './filter-bar';
+import { ColumnPicker } from './column-picker';
+import { RefreshControl } from './refresh-control';
+import { ReportTable } from './report-table';
+import { ThemeToggle } from '../shared/theme-toggle';
+
+@Component({
+  selector: 'app-report',
+  imports: [
+    SourceFilePanel,
+    KpiRow,
+    FilterBar,
+    ColumnPicker,
+    RefreshControl,
+    ReportTable,
+    ThemeToggle,
+  ],
+  templateUrl: './report.html',
+})
+export class Report implements OnInit {
+  protected readonly reportService = inject(ReportService);
+  private readonly statusService = inject(IngestionStatusService);
+
+  ngOnInit(): void {
+    this.reportService.load();
+    this.reportService.startPolling();
+    // Independent of the report: if provenance fails to load the report still works.
+    this.statusService.load();
+  }
+
+  protected retry(): void {
+    this.reportService.load();
+  }
+}
+```
+
+- [ ] **Step 2: Rewrite the shell template**
+
+Replace `frontend/src/app/report/report.html`:
+
+```html
+<div class="mx-auto max-w-7xl p-4 sm:p-6">
+  <header class="mb-5 flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-xl font-semibold text-ink-primary">Daily Summary Report</h1>
+      <p class="text-sm text-ink-secondary">
+        Net transaction quantity per client and product
+      </p>
+    </div>
+    <app-theme-toggle />
+  </header>
+
+  @if (reportService.status() === 'loading') {
+    <p class="rounded-lg border border-rule bg-surface-1 p-4 text-sm text-ink-secondary">
+      Report is still being generated — Kafka Streams is starting up. This can take a
+      few moments.
+      @if (reportService.retryCount() > 10) {
+        <span data-testid="stuck-notice" class="mt-1 block text-status-warning">
+          Still waiting after 30s — processing-service may not be healthy.
+        </span>
+      }
+    </p>
+  }
+
+  @if (reportService.status() === 'error') {
+    <div class="rounded-lg border border-status-critical/40 bg-status-critical/10 p-4">
+      <p class="text-sm text-ink-primary">{{ reportService.errorMessage() }}</p>
+      <button
+        type="button"
+        data-testid="retry"
+        class="mt-2 rounded border border-rule px-2 py-1 text-sm text-ink-secondary hover:text-ink-primary"
+        (click)="retry()"
+      >
+        Retry
+      </button>
+    </div>
+  }
+
+  @if (reportService.status() === 'ready') {
+    <div class="flex flex-col gap-5">
+      <app-source-file-panel />
+      <app-kpi-row />
+
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <app-filter-bar class="grow" />
+        <div class="flex items-center gap-3">
+          <app-refresh-control />
+          <app-column-picker />
+        </div>
+      </div>
+
+      <app-report-table />
+
+      <div>
+        <a
+          data-testid="csv-download"
+          href="/api/v1/report/csv"
+          download
+          class="inline-block rounded border border-rule px-3 py-1.5 text-sm text-ink-secondary hover:text-ink-primary"
+        >
+          Download CSV
+        </a>
+      </div>
+    </div>
+  }
+</div>
+```
+
+- [ ] **Step 3: Delete the obsolete stylesheet**
+
+```bash
+git rm frontend/src/app/report/report.css
+```
+
+The `styleUrl` reference was already dropped in Step 1's `@Component`.
+
+- [ ] **Step 4: Rewrite `report.spec.ts` for the shell's own responsibilities**
+
+The old tests asserted on the table and refresh button, which now live in child
+components with their own tests. The shell's job is narrower: call the loaders on
+init, and switch between loading / error / ready. Replace the file:
+
+```ts
+import { signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Report } from './report';
+import { ReportService } from './report.service';
+import { ReportFilters } from './report-filters';
+import { ColumnPreferences } from './column-preferences';
+import { IngestionStatusService } from './ingestion-status.service';
+import { REPORT_COLUMNS } from './report-columns';
+
+function setup(overrides: {
+  status: 'loading' | 'ready' | 'error';
+  errorMessage?: string | null;
+  retryCount?: number;
+}) {
+  const reportService = {
+    status: signal(overrides.status),
+    entries: signal([]),
+    errorMessage: signal(overrides.errorMessage ?? null),
+    retryCount: signal(overrides.retryCount ?? 0),
+    stale: signal(false),
+    lastLoadedAt: signal<Date | null>(null),
+    autoRefresh: signal(true),
+    load: vi.fn(),
+    refresh: vi.fn(),
+    startPolling: vi.fn(),
+    setAutoRefresh: vi.fn(),
+  };
+  const statusService = { status: signal(null), available: signal(false), load: vi.fn() };
+  const filters = {
+    client: signal(''),
+    account: signal(''),
+    product: signal(''),
+    search: signal(''),
+    clientOptions: signal<string[]>([]),
+    accountOptions: signal<string[]>([]),
+    productOptions: signal<string[]>([]),
+    rows: signal([]),
+    totalCount: signal(0),
+    activeFilterCount: signal(0),
+    sortColumnId: signal<string | null>(null),
+    sortDirection: signal<'asc' | 'desc'>('asc'),
+    setClient: vi.fn(),
+    setAccount: vi.fn(),
+    setProduct: vi.fn(),
+    setSearch: vi.fn(),
+    clearAll: vi.fn(),
+    toggleSort: vi.fn(),
+  };
+  const prefs = {
+    visibleIds: signal(['clientNumber']),
+    visibleColumns: signal(REPORT_COLUMNS.filter((c) => c.id === 'clientNumber')),
+    isVisible: () => true,
+    toggle: vi.fn(),
+    reset: vi.fn(),
+  };
+
+  TestBed.configureTestingModule({
+    imports: [Report],
+    providers: [
+      { provide: ReportService, useValue: reportService },
+      { provide: IngestionStatusService, useValue: statusService },
+      { provide: ReportFilters, useValue: filters },
+      { provide: ColumnPreferences, useValue: prefs },
+    ],
+  });
+  return { reportService, statusService };
+}
+
+describe('Report shell', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    TestBed.resetTestingModule();
+  });
+
+  it('loads the report, starts polling and loads provenance on init', () => {
+    const { reportService, statusService } = setup({ status: 'loading' });
+
+    TestBed.createComponent(Report).detectChanges();
+
+    expect(reportService.load).toHaveBeenCalledTimes(1);
+    expect(reportService.startPolling).toHaveBeenCalledTimes(1);
+    expect(statusService.load).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the loading banner and no table while loading', async () => {
+    setup({ status: 'loading' });
+    const fixture = TestBed.createComponent(Report);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('still being generated');
+    expect(fixture.nativeElement.querySelector('table')).toBeNull();
+  });
+
+  it('hides the stuck notice at or below the retry threshold', async () => {
+    setup({ status: 'loading', retryCount: 10 });
+    const fixture = TestBed.createComponent(Report);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('[data-testid="stuck-notice"]')).toBeNull();
+  });
+
+  it('shows the stuck notice past the retry threshold', async () => {
+    setup({ status: 'loading', retryCount: 11 });
+    const fixture = TestBed.createComponent(Report);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('[data-testid="stuck-notice"]')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Still waiting after 30s');
+  });
+
+  it('shows the error banner and wires Retry to load()', async () => {
+    const { reportService } = setup({ status: 'error', errorMessage: 'network down' });
+    const fixture = TestBed.createComponent(Report);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('network down');
+    reportService.load.mockClear();
+    fixture.nativeElement.querySelector('button[data-testid="retry"]').click();
+    expect(reportService.load).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the table region and CSV link when ready', async () => {
+    setup({ status: 'ready' });
+    const fixture = TestBed.createComponent(Report);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('table')).not.toBeNull();
+    const csvLink: HTMLAnchorElement = fixture.nativeElement.querySelector(
+      'a[data-testid="csv-download"]',
+    );
+    expect(csvLink.getAttribute('href')).toBe('/api/v1/report/csv');
+  });
+});
+```
+
+- [ ] **Step 5: Update `report.integration.spec.ts`**
+
+This test drives the real `ReportService` against `HttpTestingController`. Two
+changes are needed:
+
+1. Any inline `ReportEntry` literal must gain the new required fields — reuse the
+   `row()` factory pattern from Task 12's spec.
+2. It now issues a **second** request to `/api/v1/ingest/status` on init. Either
+   flush it or ignore it:
+
+```ts
+    // The shell also loads provenance on init; answer it so httpMock.verify() passes.
+    httpMock.expectOne('/api/v1/ingest/status').flush({
+      configuredPath: 'sample-data/Input.txt',
+      fileExists: true,
+      fileSizeBytes: 127624,
+      fileLastModified: '2026-08-12T09:14:00Z',
+      lastIngestAt: '2026-08-12T14:31:52Z',
+      fingerprint: 'fp-1',
+      totalLines: 717,
+      published: 717,
+      skipped: 0,
+      errorCount: 0,
+    });
+```
+
+Also add `localStorage.clear()` to its `beforeEach`, or a persisted
+auto-refresh/column preference from another test can change what it renders.
+
+- [ ] **Step 6: Set the page background**
+
+In `frontend/src/index.html`, add the token-driven background class to `<body>` so
+the page plane matches the theme rather than staying white in dark mode:
+
+```html
+<body class="bg-surface-page text-ink-primary">
+```
+
+- [ ] **Step 7: Run the whole frontend suite**
+
+Run: `cd frontend && npm test`
+Expected: PASS across every spec.
+
+- [ ] **Step 8: Build**
+
+Run: `cd frontend && npm run build`
+Expected: succeeds within the existing 500 kB initial budget. Tailwind's output is
+small because v4 only emits used utilities; if the budget trips, that is a real
+signal something imported the whole framework rather than a reason to raise it.
+
+- [ ] **Step 9: Full-stack manual verification, starting from teardown**
+
+**Start from a torn-down state.** The migration strategy is "teardown rather than
+rename", so beginning here is what actually *exercises* it — verifying against a
+broker that was never wiped would silently skip the one thing that decision rests
+on.
+
+```bash
+docker compose down -v --remove-orphans
+docker compose up -d --build
+curl -X POST http://localhost:8081/api/v1/ingest
+```
+
+Then open `http://localhost:8080` and confirm:
+
+- [ ] Table shows 5 rows with **client number** and **account number** as columns.
+- [ ] Column picker lists 17 columns in 5 groups; toggling one updates the table
+      immediately; the choice survives a page reload.
+- [ ] Client, Account and Product filters each populate from the data; combining
+      two narrows correctly; "N of 5 rows" updates; Clear filters appears only
+      while a filter is active.
+- [ ] Filtering to nothing shows "No rows match the current filters", **not**
+      "No transactions recorded yet".
+- [ ] Sorting by Net orders numerically (`-215` before `46`, not lexicographically).
+- [ ] Net cells show a blue bar right for positive, red left for negative, and the
+      signed number as text in every case.
+- [ ] Expiry badges read **"as of trade date"** wording. With the sample data
+      (trade `2010-08-20`, expiry `2010-09-10` = 21 days) there should be **no**
+      badge — if every row is red "expired", the comparison is using wall clock.
+- [ ] KPI row: Transactions `717`, pairs `5`, distinct clients `4`, and Fees showing
+      a **negative** USD figure. No reconciliation warning (717 = 717).
+- [ ] Source-file panel shows `sample-data/Input.txt`, a size, a modified time, an
+      ingest time, and `717 / 0 / 0`. It must **not** show an absolute path.
+- [ ] Theme toggle cycles Auto → Light → Dark, both modes are legible, and the
+      choice survives a reload.
+- [ ] Auto-refresh on: the "updated Ns ago" readout keeps resetting. Turn it off:
+      the Refresh button enables and the readout ages.
+- [ ] Stop processing-service (`docker compose stop processing-service`) with
+      auto-refresh on: **the table stays on screen** with a stale badge, rather
+      than blanking. Restart it and the badge clears.
+- [ ] Downloaded CSV is byte-identical: `diff <(curl -s
+      http://localhost:8080/api/v1/report/csv) sample-output/Output.csv` prints
+      nothing.
+- [ ] `curl -s -o /dev/null -w '%{http_code}' -X POST
+      http://localhost:8080/api/v1/ingest` returns `404`.
+
+- [ ] **Step 10: Update the READMEs**
+
+In the root `README.md`, replace the `frontend` bullet under Status:
+
+```markdown
+- `frontend` — done: Tailwind-styled Angular UI showing the daily summary with
+  per-field columns (17 available, 8 shown by default, choice persisted), client /
+  account / product filters plus global search, sortable columns, a diverging
+  net-quantity bar, source-file provenance, a KPI row with per-currency fee totals,
+  light/dark themes, and 5-second auto-refresh with a manual fallback. A failed
+  refresh keeps the last good data rather than blanking the table. See its
+  [README](frontend/README.md) for usage.
+```
+
+In `frontend/README.md`, document: the two proxied upstreams (report →
+processing-service 8082, `GET /api/v1/ingest/status` → ingestion-service 8081, and
+that `POST /api/v1/ingest` is deliberately unreachable through this origin); the
+`localStorage` keys `pfm.theme`, `pfm.autoRefresh`, `pfm.visibleColumns`; the
+5-second poll interval and its hidden-tab pause; and that expiry badges are
+measured against the row's last trade date rather than wall clock.
+
+- [ ] **Step 11: Final full verification**
+
+```bash
+mvn -q test && (cd frontend && npm test && npm run build)
+```
+
+Expected: everything passes. State the actual result — do not claim success
+without this output.
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add -A
+git commit -m "feat(frontend): assemble the redesigned report page"
+```
+
+---
+
+## Done when
+
+- `mvn -q test` passes, including `FullPipelineGoldenTest` proving the CSV is
+  byte-identical to `sample-output/Output.csv`.
+- `npm test` and `npm run build` pass in `frontend/`.
+- The Step 9 checklist is fully ticked, having started from
+  `docker compose down -v --remove-orphans`.
+- `POST /api/v1/ingest` through the frontend origin returns 404.
