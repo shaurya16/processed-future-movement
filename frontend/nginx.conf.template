@@ -4,6 +4,15 @@ server {
     index index.html;
     resolver ${NGINX_LOCAL_RESOLVERS};
 
+    # Exact match, deliberately: POST /api/v1/ingest does NOT match this location,
+    # so it falls through to /api/ -> processing-service and 404s. The UI is a
+    # viewer and cannot trigger ingestion, enforced by routing rather than policy.
+    location = /api/v1/ingest/status {
+        set $ingestion ${INGESTION_SERVICE_UPSTREAM};
+        proxy_pass $ingestion;
+        proxy_set_header Host $host;
+    }
+
     location /api/ {
         set $upstream ${PROCESSING_SERVICE_UPSTREAM};
         proxy_pass $upstream;
