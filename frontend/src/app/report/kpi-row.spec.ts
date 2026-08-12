@@ -30,11 +30,14 @@ function row(overrides: Partial<ReportEntry> = {}): ReportEntry {
   };
 }
 
-function setup(rows: ReportEntry[], status: IngestionStatus | null) {
+function setup(rows: ReportEntry[], status: IngestionStatus | null, activeFilterCount = 0) {
   TestBed.configureTestingModule({
     imports: [KpiRow],
     providers: [
-      { provide: ReportFilters, useValue: { rows: signal(rows) } },
+      {
+        provide: ReportFilters,
+        useValue: { rows: signal(rows), activeFilterCount: signal(activeFilterCount) },
+      },
       { provide: IngestionStatusService, useValue: { status: signal(status) } },
     ],
   });
@@ -128,6 +131,30 @@ describe('KpiRow', () => {
       skipped: 0,
       errorCount: 0,
     });
+    const fixture = TestBed.createComponent(KpiRow);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('[data-testid="reconcile-warning"]')).toBeNull();
+  });
+
+  it('suppresses the warning when a filter is active, even if the numbers mismatch', async () => {
+    setup(
+      [row({ tradeCount: 3 })],
+      {
+        configuredPath: 'sample-data/Input.txt',
+        fileExists: true,
+        fileSizeBytes: 127624,
+        fileLastModified: null,
+        lastIngestAt: '2026-08-12T14:31:52Z',
+        fingerprint: 'fp',
+        totalLines: 717,
+        published: 717,
+        skipped: 0,
+        errorCount: 0,
+      },
+      1,
+    );
     const fixture = TestBed.createComponent(KpiRow);
     fixture.detectChanges();
     await fixture.whenStable();

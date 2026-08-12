@@ -2,8 +2,14 @@ import { ReportEntry } from './report-entry';
 
 export type ColumnGroup = 'Client' | 'Product' | 'Position' | 'Activity' | 'Legacy';
 
-/** How a cell is drawn. `divergingBar` and `expiry` get bespoke templates. */
-export type ColumnRender = 'text' | 'date' | 'number' | 'divergingBar' | 'expiry';
+/**
+ * How a cell is drawn. `divergingBar` and `expiry` get bespoke templates.
+ * `date` is for date-only LocalDate strings (e.g. "2010-09-10"); `dateTime` is
+ * for full Instant timestamps (e.g. "2026-08-12T14:31:52Z") — they are NOT
+ * interchangeable, since a date-only string parsed as an Instant renders the
+ * wrong day in negative-offset timezones.
+ */
+export type ColumnRender = 'text' | 'date' | 'dateTime' | 'number' | 'divergingBar' | 'expiry';
 
 export interface ColumnDef {
   id: string;
@@ -58,7 +64,8 @@ export const REPORT_COLUMNS: readonly ColumnDef[] = [
     numeric: false, defaultVisible: false, render: 'date',
     sortValue: (e) => e.lastTransactionDate ?? '' },
   { id: 'lastUpdatedAt', label: 'Updated', group: 'Activity', align: 'left', numeric: false,
-    defaultVisible: false, render: 'date', sortValue: (e) => e.lastUpdatedAt ?? '' },
+    // A full Instant timestamp, not a LocalDate -- must go through formatDateTime.
+    defaultVisible: false, render: 'dateTime', sortValue: (e) => e.lastUpdatedAt ?? '' },
 
   // --- Legacy: the concatenated strings, available but off by default ---
   { id: 'Client_Information', label: 'Client_Information', group: 'Legacy', align: 'left',
