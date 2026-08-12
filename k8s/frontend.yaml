@@ -25,7 +25,7 @@ spec:
             - name: PROCESSING_SERVICE_UPSTREAM
               value: "http://processing-service.pfm.svc.cluster.local:8082"
             - name: INGESTION_SERVICE_UPSTREAM
-              value: "http://ingestion-service:8081"
+              value: "http://ingestion-service.pfm.svc.cluster.local:8081"
 ---
 apiVersion: v1
 kind: Service
