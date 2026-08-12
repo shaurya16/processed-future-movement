@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/api/v1")
 public class IngestionController {
 
     private static final Logger log = LoggerFactory.getLogger(IngestionController.class);
