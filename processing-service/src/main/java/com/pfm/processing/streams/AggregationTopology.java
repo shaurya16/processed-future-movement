@@ -1,6 +1,7 @@
 package com.pfm.processing.streams;
 
 import com.pfm.common.domain.FutureTransaction;
+import com.pfm.common.domain.NetPosition;
 import com.pfm.processing.ProcessingProperties;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.utils.Bytes;
@@ -15,6 +16,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.annotation.EnableKafkaStreams;
 
+import java.time.Clock;
+
 @Configuration
 @EnableKafkaStreams
 public class AggregationTopology {
@@ -24,10 +27,15 @@ public class AggregationTopology {
     @Bean
     public KStream<String, FutureTransaction> netQuantityStream(StreamsBuilder streamsBuilder,
                                                                   ProcessingProperties properties) {
-        return build(streamsBuilder, properties.topic());
+        return build(streamsBuilder, properties.topic(), Clock.systemUTC());
     }
 
-    static KStream<String, FutureTransaction> build(StreamsBuilder streamsBuilder, String topic) {
+    /**
+     * @param clock supplies each aggregate's {@code lastUpdatedAt}. Injected rather than
+     *              read from {@code Instant.now()} so tests can pin it; {@code Aggregator}
+     *              has no {@code ProcessorContext} to read stream time from.
+     */
+    static KStream<String, FutureTransaction> build(StreamsBuilder streamsBuilder, String topic, Clock clock) {
         streamsBuilder.addStateStore(Stores.keyValueStoreBuilder(
                 Stores.persistentKeyValueStore(DedupProcessor.STORE_NAME), Serdes.String(), Serdes.Long()));
 
@@ -39,11 +47,11 @@ public class AggregationTopology {
 
         deduped.groupByKey(Grouped.with(Serdes.String(), TransactionSerde.instance()))
                 .aggregate(
-                        () -> 0L,
-                        (key, transaction, total) -> total + (transaction.quantityLong() - transaction.quantityShort()),
-                        Materialized.<String, Long, KeyValueStore<Bytes, byte[]>>as(NET_QUANTITY_STORE)
+                        NetPosition::empty,
+                        (key, transaction, position) -> position.plus(transaction, clock.instant()),
+                        Materialized.<String, NetPosition, KeyValueStore<Bytes, byte[]>>as(NET_QUANTITY_STORE)
                                 .withKeySerde(Serdes.String())
-                                .withValueSerde(Serdes.Long()));
+                                .withValueSerde(NetPositionSerde.instance()));
 
         return deduped;
     }

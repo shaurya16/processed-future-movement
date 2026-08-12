@@ -1,6 +1,7 @@
 package com.pfm.processing.streams;
 
 import com.pfm.common.domain.FutureTransaction;
+import com.pfm.common.domain.NetPosition;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.header.internals.RecordHeaders;
@@ -17,8 +18,10 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,6 +31,8 @@ class AggregationTopologyTest {
 
     private static final String TOPIC = "future-transactions";
     private static final String KEY = "CL432100020001|SGXFUNK20100910";
+    private static final Instant NOW = Instant.parse("2026-08-12T14:31:52Z");
+    private static final Clock FIXED_CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
 
     private TopologyTestDriver driver;
     private TestInputTopic<String, FutureTransaction> inputTopic;
@@ -35,7 +40,7 @@ class AggregationTopologyTest {
     @BeforeEach
     void setUp() {
         StreamsBuilder builder = new StreamsBuilder();
-        AggregationTopology.build(builder, TOPIC);
+        AggregationTopology.build(builder, TOPIC, FIXED_CLOCK);
 
         Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, "aggregation-topology-test");
@@ -55,8 +60,9 @@ class AggregationTopologyTest {
         pipeInput(KEY, transaction(100, 30), "tx-1"); // net +70
         pipeInput(KEY, transaction(50, 80), "tx-2");   // net -30
 
-        KeyValueStore<String, Long> store = driver.getKeyValueStore(AggregationTopology.NET_QUANTITY_STORE);
-        assertEquals(40L, store.get(KEY));
+        KeyValueStore<String, NetPosition> store =
+                driver.getKeyValueStore(AggregationTopology.NET_QUANTITY_STORE);
+        assertEquals(40L, store.get(KEY).netQuantity());
     }
 
     @Test
@@ -66,8 +72,10 @@ class AggregationTopologyTest {
         pipeInput(KEY, transaction, "tx-1");
         pipeInput(KEY, transaction, "tx-1"); // retried/re-published duplicate
 
-        KeyValueStore<String, Long> store = driver.getKeyValueStore(AggregationTopology.NET_QUANTITY_STORE);
-        assertEquals(70L, store.get(KEY));
+        KeyValueStore<String, NetPosition> store =
+                driver.getKeyValueStore(AggregationTopology.NET_QUANTITY_STORE);
+        assertEquals(70L, store.get(KEY).netQuantity());
+        assertEquals(1, store.get(KEY).tradeCount());
     }
 
     @Test
@@ -77,14 +85,40 @@ class AggregationTopologyTest {
         pipeInput(KEY, transaction, "tx-1");
         pipeInput(KEY, transaction, "tx-2"); // different transactionId: a real second trade
 
-        KeyValueStore<String, Long> store = driver.getKeyValueStore(AggregationTopology.NET_QUANTITY_STORE);
-        assertEquals(140L, store.get(KEY));
+        KeyValueStore<String, NetPosition> store =
+                driver.getKeyValueStore(AggregationTopology.NET_QUANTITY_STORE);
+        assertEquals(140L, store.get(KEY).netQuantity());
     }
 
     @Test
     void aNeverSeenKeyHasNoEntryInTheStore() {
-        KeyValueStore<String, Long> store = driver.getKeyValueStore(AggregationTopology.NET_QUANTITY_STORE);
+        KeyValueStore<String, NetPosition> store =
+                driver.getKeyValueStore(AggregationTopology.NET_QUANTITY_STORE);
         assertNull(store.get("no-such-key"));
+    }
+
+    @Test
+    void tracksGrossQuantitiesAndTradeCountAlongsideNet() {
+        pipeInput(KEY, transaction(500, 0), "tx-1");
+        pipeInput(KEY, transaction(0, 500), "tx-2");
+
+        KeyValueStore<String, NetPosition> store =
+                driver.getKeyValueStore(AggregationTopology.NET_QUANTITY_STORE);
+        NetPosition position = store.get(KEY);
+
+        assertEquals(0L, position.netQuantity());
+        assertEquals(500L, position.grossLong());
+        assertEquals(500L, position.grossShort());
+        assertEquals(2, position.tradeCount());
+    }
+
+    @Test
+    void stampsLastUpdatedAtFromTheInjectedClock() {
+        pipeInput(KEY, transaction(100, 30), "tx-1");
+
+        KeyValueStore<String, NetPosition> store =
+                driver.getKeyValueStore(AggregationTopology.NET_QUANTITY_STORE);
+        assertEquals(NOW, store.get(KEY).lastUpdatedAt());
     }
 
     private void pipeInput(String key, FutureTransaction transaction, String transactionId) {
