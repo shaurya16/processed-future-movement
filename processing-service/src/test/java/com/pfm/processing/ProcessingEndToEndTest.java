@@ -123,7 +123,7 @@ class ProcessingEndToEndTest {
         ResponseEntity<ReportEntry[]> lastResponse = null;
         while (System.currentTimeMillis() < deadline) {
             try {
-                ResponseEntity<ReportEntry[]> response = restTemplate.getForEntity("/api/report", ReportEntry[].class);
+                ResponseEntity<ReportEntry[]> response = restTemplate.getForEntity("/api/v1/report", ReportEntry[].class);
                 lastResponse = response;
                 if (response.getStatusCode().value() == 200 && response.getBody() != null) {
                     for (ReportEntry entry : response.getBody()) {

@@ -20,12 +20,12 @@ public class ReportController {
         this.reportService = reportService;
     }
 
-    @GetMapping("/api/report")
+    @GetMapping("/api/v1/report")
     public List<ReportEntry> report() {
         return reportService.currentReport();
     }
 
-    @GetMapping(value = "/api/report/csv", produces = "text/csv")
+    @GetMapping(value = "/api/v1/report/csv", produces = "text/csv")
     public ResponseEntity<String> reportCsv() {
         List<ReportEntry> entries = reportService.currentReport();
         StringBuilder csv = new StringBuilder("Client_Information,Product_Information,Total_Transaction_Amount\n");

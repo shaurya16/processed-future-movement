@@ -29,7 +29,7 @@ class ReportControllerTest {
                 new ReportEntry("CL432100020001", "SGXFUNK20100910", 46L),
                 new ReportEntry("CL432100030001", "CMEFUN120100910", -79L)));
 
-        mockMvc.perform(get("/api/report"))
+        mockMvc.perform(get("/api/v1/report"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].Client_Information").value("CL432100020001"))
                 .andExpect(jsonPath("$[0].Product_Information").value("SGXFUNK20100910"))
@@ -42,7 +42,7 @@ class ReportControllerTest {
     void getReportReturnsEmptyArrayWhenNothingAggregatedYet() throws Exception {
         when(reportService.currentReport()).thenReturn(List.of());
 
-        mockMvc.perform(get("/api/report"))
+        mockMvc.perform(get("/api/v1/report"))
                 .andExpect(status().isOk())
                 .andExpect(content().json("[]"));
     }
@@ -63,7 +63,7 @@ class ReportControllerTest {
                 + "CL432100020001,SGXFUNK20100910,46\n"
                 + "CL432100030001,CMEFUN120100910,-79\n";
 
-        mockMvc.perform(get("/api/report/csv"))
+        mockMvc.perform(get("/api/v1/report/csv"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith("text/csv"))
                 .andExpect(content().string(expectedCsv));
@@ -73,7 +73,7 @@ class ReportControllerTest {
     void getReportReturns503WhenStoreIsNotReady() throws Exception {
         when(reportService.currentReport()).thenThrow(new StoreNotReadyException());
 
-        mockMvc.perform(get("/api/report"))
+        mockMvc.perform(get("/api/v1/report"))
                 .andExpect(status().isServiceUnavailable());
     }
 }

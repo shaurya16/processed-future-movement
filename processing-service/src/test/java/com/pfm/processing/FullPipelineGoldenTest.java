@@ -83,7 +83,7 @@ class FullPipelineGoldenTest {
 
         RestTemplate rest = new RestTemplate();
         IngestionResult ingestResult = rest.postForObject(
-                "http://localhost:18081/api/ingest", null, IngestionResult.class);
+                "http://localhost:18081/api/v1/ingest", null, IngestionResult.class);
         assertEquals(717, ingestResult.published());
 
         String csv = awaitFullReportCsv(rest);
@@ -103,7 +103,7 @@ class FullPipelineGoldenTest {
         String lastBody = null;
         while (System.currentTimeMillis() < deadline) {
             try {
-                lastBody = rest.getForObject("http://localhost:18082/api/report/csv", String.class);
+                lastBody = rest.getForObject("http://localhost:18082/api/v1/report/csv", String.class);
                 if (EXPECTED_CSV.equals(lastBody)) {
                     return lastBody;
                 }
