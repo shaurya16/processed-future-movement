@@ -100,8 +100,9 @@ per-currency fees. The frontend then renders a column-definition-driven table.
 | Create `src/app/report/source-file-panel.ts` | File provenance panel. |
 | Modify `src/app/report/report.ts` + `.html` + `.css` | Shell/composition only. |
 
-**Config** — `frontend/nginx.conf.template`, `frontend/Dockerfile`,
-`frontend/proxy.conf.json`, `docker-compose.yml`, `k8s/frontend.yaml`.
+**Config** — `frontend/nginx.conf.template`, `frontend/proxy.conf.json`,
+`docker-compose.yml`, `k8s/frontend.yaml`. (`frontend/Dockerfile` needs no change:
+the nginx image's template entrypoint substitutes every environment variable.)
 
 ---
 
@@ -2084,12 +2085,13 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:8080/api/v1/in
 
 Expected: `200`, a JSON body containing `"configuredPath":"sample-data/Input.txt"`,
 `200`, then `404`. If nginx failed to start, `docker compose logs frontend` will
-show an unresolved `${INGESTION_SERVICE_UPSTREAM}` — revisit Step 2.
+show an unresolved `${INGESTION_SERVICE_UPSTREAM}`, meaning the environment
+variable never reached the container — revisit Step 2.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add frontend/nginx.conf.template frontend/Dockerfile frontend/proxy.conf.json \
+git add frontend/nginx.conf.template frontend/proxy.conf.json \
         docker-compose.yml k8s/frontend.yaml
 git commit -m "feat(frontend): route GET /api/v1/ingest/status to ingestion-service only"
 ```
