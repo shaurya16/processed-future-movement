@@ -82,9 +82,13 @@ expected result is visible without running anything.
   maintains a running per-(client, product) net-quantity aggregate, exposed via
   `GET /api/v1/report` and `GET /api/v1/report/csv`. See its
   [README](processing-service/README.md) for usage.
-- `frontend` — done: Angular UI displays the daily summary report and downloads it as
-  CSV, distinguishing "store not ready" (`503`, auto-retries) from "zero rows so far"
-  (`200` with `[]`). See its [README](frontend/README.md) for usage.
+- `frontend` — done: Tailwind-styled Angular UI showing the daily summary with
+  per-field columns (17 available, 8 shown by default, choice persisted), client /
+  account / product filters plus global search, sortable columns, a diverging
+  net-quantity bar, source-file provenance, a KPI row with per-currency fee totals,
+  light/dark themes, and 5-second auto-refresh with a manual fallback. A failed
+  refresh keeps the last good data rather than blanking the table. See its
+  [README](frontend/README.md) for usage.
 - `k8s` — done: manifests for Kafka, `ingestion-service`, `processing-service`, and
   `frontend` in a `pfm` namespace, plus Dockerfiles for all three application images.
   `processing-service`'s Kafka Streams startup-ordering bug (fatal if it starts before
