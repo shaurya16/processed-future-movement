@@ -5,8 +5,8 @@ topic, dedupes retried/re-published records by their `transactionId` header, and
 maintains a running per-(Client_Information, Product_Information) net quantity
 aggregate — exposed via:
 
-- `GET /api/report` — JSON
-- `GET /api/report/csv` — CSV download (`Output.csv` format)
+- `GET /api/v1/report` — JSON
+- `GET /api/v1/report/csv` — CSV download (`Output.csv` format)
 
 Design decisions: [docs/superpowers/specs/2026-08-09-processing-service-design.md](../docs/superpowers/specs/2026-08-09-processing-service-design.md).
 
@@ -24,6 +24,6 @@ In a separate terminal, once `ingestion-service` has published some records (see
 own README) and this service has been running long enough to consume them:
 
 ```bash
-curl http://localhost:8082/api/report
-curl http://localhost:8082/api/report/csv
+curl http://localhost:8082/api/v1/report
+curl http://localhost:8082/api/v1/report/csv
 ```

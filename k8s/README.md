@@ -38,10 +38,10 @@ future-transactions topic..." line versus signs Kafka never came up.
 Kafka broker on a cold `kubectl apply -f k8s/`. This was deliberately not added: its
 Kafka producer uses the client defaults (effectively-infinite retries bounded by a
 120s `delivery.timeout.ms`) and the broker's default `auto.create.topics.enable=true`,
-so a `POST /api/ingest` that lands before Kafka's listener is accepting connections
+so a `POST /api/v1/ingest` that lands before Kafka's listener is accepting connections
 just retries under the hood instead of failing. Verified by repeatedly killing both
 the `kafka` and `ingestion-service` pods together on a fresh `kind` cluster and firing
-`POST /api/ingest` within ~1s of `ingestion-service` coming up (once via the `Service`,
+`POST /api/v1/ingest` within ~1s of `ingestion-service` coming up (once via the `Service`,
 once straight against the pod IP, bypassing the readiness gate) — every run published
 all 717 records with no errors.
 
@@ -50,7 +50,7 @@ Trigger ingestion of the sample data:
 ```bash
 kubectl port-forward -n pfm svc/ingestion-service 18081:8081 &
 sleep 2
-curl -X POST http://localhost:18081/api/ingest
+curl -X POST http://localhost:18081/api/v1/ingest
 ```
 
 Then port-forward the frontend and open the report UI (a plain `kind create cluster` doesn't
