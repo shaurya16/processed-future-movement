@@ -5611,6 +5611,12 @@ Then open `http://localhost:8080` and confirm:
 - [ ] Filtering to nothing shows "No rows match the current filters", **not**
       "No transactions recorded yet".
 - [ ] Sorting by Net orders numerically (`-215` before `46`, not lexicographically).
+- [ ] **Sticky header actually sticks.** Select enough columns and rows to overflow,
+      then scroll: the header must remain visible. This cannot be unit-tested —
+      jsdom performs no layout — and the first implementation looked correct while
+      being inert, because `overflow-x: auto` makes the container a scroll container
+      on both axes, so an unbounded-height wrapper leaves `position: sticky`
+      anchored to something that never scrolls.
 - [ ] Net cells show a blue bar right for positive, red left for negative, and the
       signed number as text in every case.
 - [ ] Expiry badges read **"as of trade date"** wording. With the sample data
