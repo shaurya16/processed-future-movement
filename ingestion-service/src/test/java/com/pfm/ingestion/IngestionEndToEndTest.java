@@ -45,7 +45,6 @@ class IngestionEndToEndTest {
     static void kafkaProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
         registry.add("ingestion.file-path", IngestionEndToEndTest::sampleFilePath);
-        registry.add("ingestion.topic", () -> "future-transactions");
     }
 
     @Autowired

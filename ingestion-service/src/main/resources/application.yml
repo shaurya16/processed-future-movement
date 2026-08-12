@@ -9,7 +9,7 @@ spring:
 
 ingestion:
   file-path: ${INGESTION_FILE_PATH:sample-data/Input.txt}
-  topic: ${PFM_TOPIC}
+  topic: future-transactions
 
 management:
   endpoint:
