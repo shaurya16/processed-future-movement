@@ -4,6 +4,8 @@ server:
 spring:
   application:
     name: processing-service
+  config:
+    import: classpath:pfm-defaults.yml
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     streams:
@@ -12,7 +14,7 @@ spring:
         processing.guarantee: exactly_once_v2
 
 processing:
-  topic: future-transactions
+  topic: ${pfm.topic}
 
 management:
   endpoint:
