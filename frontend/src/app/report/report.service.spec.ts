@@ -250,6 +250,20 @@ describe('ReportService refresh semantics', () => {
     expect(service.entries()).toEqual([]);
   });
 
+  it('routes a refresh that happens before any successful load to the error screen', () => {
+    // Nothing has loaded yet, so there is no good data to preserve — this must not
+    // be treated as a stale refresh over an empty table.
+    service.refresh();
+    httpMock.expectOne('/api/v1/report').flush(
+      { error: 'boom' },
+      { status: 500, statusText: 'Server Error' },
+    );
+
+    expect(service.status()).toBe('error');
+    expect(service.stale()).toBe(false);
+    expect(service.entries()).toEqual([]);
+  });
+
   it('treats a 503 during refresh as stale rather than restarting the retry loop', () => {
     service.load();
     httpMock.expectOne('/api/v1/report').flush([row()]);
