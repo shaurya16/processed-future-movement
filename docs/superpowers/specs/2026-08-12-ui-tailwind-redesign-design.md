@@ -139,12 +139,15 @@ following the existing `TransactionSerde` pattern. `netQuantity` continues to be
 it is today.
 
 **`lastUpdatedAt` sourcing.** The `Aggregator` interface has no
-`ProcessorContext`, so the observation time must be supplied from upstream.
-`DedupProcessor` already sits in the topology and already calls
-`context.currentSystemTimeMs()`, so it is the natural seam: it forwards a
-`TimestampedTransaction(FutureTransaction transaction, long observedAtMs)`
-wrapper and the aggregator reads the timestamp from it. This keeps wall-clock
-access in the one component that already has it.
+`ProcessorContext`, so the observation time must be supplied from outside. A
+`java.time.Clock` is passed into `AggregationTopology.build(...)` and the
+aggregator calls `clock.instant()`.
+
+An earlier draft had `DedupProcessor` forward a
+`TimestampedTransaction(FutureTransaction, long observedAtMs)` wrapper instead.
+The `Clock` reaches the same outcome for less: no wrapper record, no second serde,
+no change to the topology's generic types — and it makes the timestamp
+deterministic in tests via `Clock.fixed`, which the wrapper did not.
 
 Caveat to accept explicitly: `lastUpdatedAt` is *processing* time, not event
 time, so a state-store rebuild re-stamps every row with the rebuild time. That
@@ -274,7 +277,7 @@ Wiring for the new `INGESTION_SERVICE_UPSTREAM` variable:
 
 | File | Change |
 |---|---|
-| `frontend/Dockerfile` | add to the `envsubst` variable list |
+| `frontend/Dockerfile` | no change needed — it copies the template to `/etc/nginx/templates/` and the nginx image's own entrypoint substitutes *every* environment variable, with no explicit list to extend |
 | `docker-compose.yml` | `INGESTION_SERVICE_UPSTREAM: http://ingestion-service:8081` on the `frontend` service |
 | `k8s/frontend.yaml` | same as an env var on the container |
 | `frontend/proxy.conf.json` | `"/api/v1/ingest": { "target": "http://localhost:8081", "secure": false }` for dev |

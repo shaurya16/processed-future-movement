@@ -4317,13 +4317,142 @@ Create `frontend/src/app/report/report-table.html`:
 Run: `cd frontend && npx vitest run src/app/report/report-table.spec.ts`
 Expected: PASS — 7 tests.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: Write the failing changed-row test**
+
+A live table should show what just moved. Append to `cell-view.spec.ts`:
+
+```ts
+import { changedKeys } from './cell-view';
+
+describe('changedKeys', () => {
+  const key = (r: { c: string; p: string }) => r.c + '|' + r.p;
+
+  it('reports nothing on the first snapshot', () => {
+    // Everything is "new" initially; flashing every row on load would be noise.
+    const rows = [{ k: 'a', updated: 't1' }];
+
+    expect(changedKeys(null, rows, (r) => r.k, (r) => r.updated).size).toBe(0);
+  });
+
+  it('reports a row whose timestamp advanced', () => {
+    const before = new Map([['a', 't1'], ['b', 't1']]);
+    const rows = [{ k: 'a', updated: 't2' }, { k: 'b', updated: 't1' }];
+
+    const changed = changedKeys(before, rows, (r) => r.k, (r) => r.updated);
+
+    expect([...changed]).toEqual(['a']);
+  });
+
+  it('reports a newly appeared row', () => {
+    const before = new Map([['a', 't1']]);
+    const rows = [{ k: 'a', updated: 't1' }, { k: 'b', updated: 't1' }];
+
+    expect([...changedKeys(before, rows, (r) => r.k, (r) => r.updated)]).toEqual(['b']);
+  });
+
+  it('reports nothing when a poll returns identical data', () => {
+    const before = new Map([['a', 't1']]);
+    const rows = [{ k: 'a', updated: 't1' }];
+
+    expect(changedKeys(before, rows, (r) => r.k, (r) => r.updated).size).toBe(0);
+  });
+});
+```
+
+- [ ] **Step 9: Implement `changedKeys` and wire the flash**
+
+Append to `frontend/src/app/report/cell-view.ts`:
+
+```ts
+/**
+ * Keys whose timestamp advanced since the previous snapshot, plus keys that are
+ * new. Returns empty for a null previous snapshot: on first load every row would
+ * qualify, and flashing the whole table conveys nothing.
+ */
+export function changedKeys<T>(
+  previous: ReadonlyMap<string, string | null> | null,
+  rows: readonly T[],
+  keyOf: (row: T) => string,
+  updatedAtOf: (row: T) => string | null,
+): Set<string> {
+  if (previous === null) {
+    return new Set();
+  }
+  const changed = new Set<string>();
+  for (const row of rows) {
+    const key = keyOf(row);
+    if (!previous.has(key) || previous.get(key) !== updatedAtOf(row)) {
+      changed.add(key);
+    }
+  }
+  return changed;
+}
+```
+
+In `report-table.ts`, add the snapshot tracking. Import `effect`, `signal` and
+`changedKeys`, then add to the class:
+
+```ts
+  private previousSnapshot: Map<string, string | null> | null = null;
+  private readonly _changed = signal<ReadonlySet<string>>(new Set());
+
+  protected readonly changed = this._changed.asReadonly();
+
+  constructor() {
+    // Recompute whenever a poll replaces the rows.
+    effect(() => {
+      const rows = this.filters.rows();
+      this._changed.set(
+        changedKeys(this.previousSnapshot, rows, (row) => this.rowKey(row), (row) => row.lastUpdatedAt),
+      );
+      this.previousSnapshot = new Map(rows.map((row) => [this.rowKey(row), row.lastUpdatedAt]));
+    });
+  }
+```
+
+Add the component-scoped animation to the `@Component` decorator (the global
+`prefers-reduced-motion` rule from Task 11 already neutralises it for users who
+ask for that):
+
+```ts
+  styles: [
+    `
+      @keyframes row-flash {
+        from {
+          background-color: color-mix(in oklab, var(--net-long) 18%, transparent);
+        }
+        to {
+          background-color: transparent;
+        }
+      }
+      .row-changed {
+        animation: row-flash 1.2s ease-out;
+      }
+    `,
+  ],
+```
+
+In `report-table.html`, add the class binding to the body row:
+
+```html
+        <tr
+          class="border-b border-rule last:border-0 hover:bg-surface-page"
+          [class.row-changed]="changed().has(rowKey(entry))"
+        >
+```
+
+- [ ] **Step 10: Run the tests to verify they pass**
+
+Run: `cd frontend && npx vitest run src/app/report/cell-view.spec.ts src/app/report/report-table.spec.ts`
+Expected: PASS — 15 cell-view tests plus 7 table tests.
+
+- [ ] **Step 11: Commit**
 
 ```bash
 git add frontend/src/app/report/cell-view.ts frontend/src/app/report/cell-view.spec.ts \
         frontend/src/app/report/report-table.ts frontend/src/app/report/report-table.html \
         frontend/src/app/report/report-table.spec.ts
-git commit -m "feat(frontend): add the report table with diverging net bar and expiry badges"
+git commit -m "feat(frontend): add the report table with diverging net bar, expiry badges and change flash"
 ```
 
 ---
