@@ -22,9 +22,17 @@ per-currency fees. The frontend then renders a column-definition-driven table.
 ## Global Constraints
 
 - **CSV output must not change.** `GET /api/v1/report/csv` stays byte-identical
-  to `sample-output/Output.csv`: 246 bytes, header
+  to `sample-output/Output.csv`: **240 bytes, LF-only**, header
   `Client_Information,Product_Information,Total_Transaction_Amount`, one row per
-  entry, trailing `\n`. Task 6 locks this with a golden test.
+  entry sorted by client then product, trailing `\n`. Task 7 locks this with a
+  golden test.
+
+  Corrected during execution: the committed fixture was originally 246 bytes with
+  CRLF terminators and rows in input-encounter order, so it had never matched the
+  API — the drift was hidden because the golden test compared against a hardcoded
+  literal that encoded the API's form instead of the file's. The values were
+  identical throughout; only line endings and row order differed. Ruling: the API
+  is authoritative, and the fixture was regenerated to match it.
 - **The three original JSON property names are frozen:** `Client_Information`,
   `Product_Information`, `Total_Transaction_Amount`. New fields are additive only.
 - **Store name stays `net-quantity-store`; `application-id` stays

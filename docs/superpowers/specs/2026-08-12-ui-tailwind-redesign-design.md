@@ -529,10 +529,18 @@ region and the page body never scrolls horizontally. The table header is sticky.
 - `ReportEntry` decodes dimensions from the key correctly.
 - **Golden CSV test: `GET /api/v1/report/csv` is byte-identical to
   `sample-output/Output.csv`** after ingesting `sample-data/Input.txt`. This is
-  the contract lock for "the CSV format does not change." The fixture is 246
-  bytes ending in a trailing `\n`, which matches what the controller's
-  per-line `append("\n")` already produces — so "byte-identical" is literal,
-  including that final newline.
+  the contract lock for "the CSV format does not change." The fixture is **240
+  bytes, LF-only**, rows sorted by client then product, with a trailing `\n` —
+  matching what the controller's per-line `append('\n')` produces, so
+  "byte-identical" is literal.
+
+  The fixture originally committed was 246 bytes with CRLF terminators and rows in
+  input-encounter order, and had therefore never matched the API. That went
+  unnoticed because the golden test asserted against a hardcoded literal holding
+  the API's form rather than reading the file. Values matched all along; only line
+  endings and ordering differed. The API was ruled authoritative and the fixture
+  regenerated. The test must compare strictly — no line-ending normalisation and
+  no re-sorting, or it stops detecting exactly the drift that hid this.
 - `FullPipelineGoldenTest` continues to pass end-to-end.
 - 503-when-store-not-ready preserved.
 
