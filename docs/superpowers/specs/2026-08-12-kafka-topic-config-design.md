@@ -39,34 +39,88 @@ fact.
 
 | Environment | Single declaration | Consumers |
 |---|---|---|
-| Local (`mvn spring-boot:run`) | `PFM_TOPIC` exported on the command line, documented in each service's README | Spring reads it directly — no default to fall back on |
+| Java (both services) | New `common/src/main/resources/pfm-defaults.yml`: `pfm.topic: ${PFM_TOPIC:future-transactions}` | Both `application.yml` files import it (`spring.config.import: classpath:pfm-defaults.yml`) and reference `${pfm.topic}` instead of owning their own literal |
 | Docker Compose | One `x-topic: &pfm-topic future-transactions` YAML anchor at the top of `docker-compose.yml` | `ingestion-service`, `processing-service`, and `wait-for-topic` each get `PFM_TOPIC: *pfm-topic` in their `environment:` block |
 | Kubernetes | New `k8s/topic-config.yaml` ConfigMap (`data.PFM_TOPIC: future-transactions`) | `ingestion-service.yaml`, `processing-service.yaml`'s main container, and its `wait-for-topic` initContainer all pull `PFM_TOPIC` via `configMapKeyRef` |
 
-Both `application.yml` files change from a literal:
+Both `application.yml` files change from an independent literal:
 
 ```yaml
 ingestion:
   topic: future-transactions
 ```
 
-to a required placeholder, with no default:
+to a reference into the shared defaults file:
 
 ```yaml
+spring:
+  config:
+    import: classpath:pfm-defaults.yml
+
 ingestion:
-  topic: ${PFM_TOPIC}
+  topic: ${pfm.topic}
 ```
 
-(and the `processing:` equivalent in `processing-service`).
+(and the `processing:` equivalent in `processing-service`, same import line).
 
-### Why not keep a matching default in both `application.yml` files?
+### Revision history: this section originally specified `${PFM_TOPIC}` with no default
 
-That was considered (`topic: ${PFM_TOPIC:future-transactions}` in both) and
-rejected: it still leaves the literal duplicated as a fallback, just one
-layer down — the exact shape of problem this change exists to eliminate.
-Dropping the default instead means Spring's placeholder resolution throws at
-startup if `PFM_TOPIC` isn't set — fail fast and loud, never a silently
-empty topic.
+The first version of this design made the property required with no
+fallback (`topic: ${PFM_TOPIC}`), reasoning that Spring's placeholder
+resolution would throw at startup if `PFM_TOPIC` was unset — fail fast and
+loud, never a silently empty topic. **That assumption was wrong**, confirmed
+empirically during implementation:
+
+- For `@ConfigurationProperties`-bound records (`IngestionProperties`,
+  `ProcessingProperties`), Spring Boot's relaxed binder resolves placeholders
+  with `ignoreUnresolvablePlaceholders = true`. An unresolved `${PFM_TOPIC}`
+  is bound as the literal string `"${PFM_TOPIC}"`, not thrown.
+- `ingestion-service`: `KafkaAdmin`'s topic-creation failure (the invalid
+  literal topic name) is logged at ERROR and swallowed by default — the
+  Spring context finishes starting, Tomcat serves traffic, and
+  `/actuator/health/readiness` reports `UP`. This is exactly the silent
+  misconfiguration the whole task exists to prevent.
+- `processing-service`: the context also starts successfully; Kafka Streams'
+  background thread dies asynchronously on the same invalid-topic error, and
+  `/actuator/health/readiness` does correctly flip to `DOWN` — a real signal,
+  but not a startup-time failure, and easy to miss outside a system (like
+  k8s) that gates traffic on that probe.
+
+A zero-code fix existed for `ingestion-service` alone
+(`spring.kafka.admin.fail-fast: true`, verified to abort context refresh),
+but `processing-service` has no equivalent — it deliberately never creates
+the topic itself (see `k8s/README.md`), so there is no admin-side hook to
+make fail-fast. Reaching a genuine startup failure for `processing-service`
+would have required a hand-rolled validation in `src/main` (e.g. a
+`@PostConstruct` check), touching Java code and creating an asymmetric fix
+between the two services.
+
+### Why the shared-defaults-file approach instead
+
+The shared classpath resource sidesteps the whole problem rather than
+patching around it: if `ingestion-service` and `processing-service` both
+resolve their topic from the exact same imported file, they cannot disagree
+— whether or not `PFM_TOPIC` is ever set in a given environment. Forgetting
+to set `PFM_TOPIC` stops being a failure mode at all: both services
+consistently fall back to the same value from the same source. This is a
+stronger guarantee than "fails loudly if forgotten" — it makes the forgotten
+case harmless by construction.
+
+It also happens to provide a genuine, framework-guaranteed fail-fast for a
+different (and arguably more useful) failure mode: `spring.config.import`
+with a non-optional (`classpath:`, not `optional:classpath:`) location
+throws `ConfigDataResourceNotFoundException` and aborts context startup if
+the resource is missing — verified empirically (renaming the file out of
+`common`'s resources and rebuilding produces "APPLICATION FAILED TO START:
+Config data resource ... does not exist" and a non-zero exit). That covers
+a real packaging defect (the resource not making it into `common`'s jar)
+symmetrically for both services, with no `src/main` Java changes — only one
+new YAML resource file in `common`.
+
+`PFM_TOPIC` remains meaningful as a deploy-time override (a different topic
+name for staging vs. prod is legitimate 12-factor config) — Docker Compose
+and Kubernetes still set it explicitly for that purpose. It's just no longer
+load-bearing for avoiding drift between the two services.
 
 ### Why an anchor for Compose but a ConfigMap for k8s?
 
@@ -96,59 +150,60 @@ echo "$PFM_TOPIC topic found, starting processing-service"
 
 ## Side effects
 
-- `ingestion-service/README.md` and `processing-service/README.md` document
-  standalone `mvn -pl <service> spring-boot:run` workflows that don't go
-  through Compose or k8s. Each needs `PFM_TOPIC=future-transactions` added to
-  that command line, the same way `INGESTION_FILE_PATH` is already handled
-  for `ingestion-service`.
-- `k8s/README.md` gets a one-line note that the topic name now comes from
-  `k8s/topic-config.yaml` rather than being hardcoded in the manifest.
+- No README changes needed for the standalone `mvn -pl <service>
+  spring-boot:run` workflows in `ingestion-service/README.md` /
+  `processing-service/README.md` — behavior there is unchanged from today:
+  no env var required, the topic resolves to `future-transactions` either
+  way. (This is a change from the rejected first version of this design,
+  which would have required documenting `PFM_TOPIC=future-transactions` on
+  every standalone run command.)
+- `k8s/README.md` gets a one-line note that the topic name comes from
+  `k8s/topic-config.yaml`, settable per-deployment via `PFM_TOPIC`.
 
 ## Testing
 
-`FullPipelineGoldenTest` and the pure-unit tests (`IngestionServiceTest`,
-`KafkaConfigTest`'s topic-content assertion, `AggregationTopologyTest`,
-`TransactionSerdeTest`) already set `ingestion.topic` / `processing.topic`
-explicitly or use `"future-transactions"` as their own literal fixture —
-unaffected by removing `application.yml`'s default.
+`FullPipelineGoldenTest` sets `ingestion.topic` / `processing.topic`
+explicitly as Spring properties (bypassing `application.yml`/its imports
+entirely) and disables default config-file loading — unaffected, needs no
+change.
 
-However, five `@SpringBootTest` classes boot the full Spring context off the
-unmodified classpath `application.yml` and currently rely on its default
-silently supplying the topic — they don't set `ingestion.topic` /
-`processing.topic` themselves:
-
-- `ingestion-service`: `IngestionServiceApplicationTests`, `KafkaConfigTest`,
-  `IngestionEndToEndTest`
-- `processing-service`: `ProcessingServiceApplicationTests`,
-  `ProcessingEndToEndTest`
-
-Once the default is removed, these fail context startup (unresolved
-`${PFM_TOPIC}` placeholder) unless `PFM_TOPIC` happens to be set in the
-`mvn test` environment. Rather than depend on that, each test gets the topic
-added to its existing explicit property mechanism — `properties = {...}` for
-`IngestionServiceApplicationTests`, `KafkaConfigTest`, and
-`ProcessingServiceApplicationTests`; a `registry.add(...)` line in the
-existing `@DynamicPropertySource` method for `IngestionEndToEndTest` and
-`ProcessingEndToEndTest`. This makes each test's dependency on the topic
-name explicit rather than implicit, consistent with how
-`FullPipelineGoldenTest` already does it.
+The five `@SpringBootTest` classes that boot the full Spring context off the
+unmodified classpath `application.yml` (`ingestion-service`:
+`IngestionServiceApplicationTests`, `KafkaConfigTest`,
+`IngestionEndToEndTest`; `processing-service`:
+`ProcessingServiceApplicationTests`, `ProcessingEndToEndTest`) are expected
+to need **no changes either**, unlike the rejected first version of this
+design. `spring.config.import` still resolves normally when these tests
+boot the default `application.yml`, `pfm.topic` still falls back to
+`future-transactions` when `PFM_TOPIC` is unset (as it will be in a test
+JVM), and `${pfm.topic}` resolves to the same value these tests always
+implicitly relied on — nothing about their observable behavior changes.
+This must still be confirmed by actually running `mvn test` per module
+during implementation, not assumed from this reasoning alone.
 
 ### Manual verification
 
-1. `mvn test` across modules — should be unaffected; confirms no hidden
-   dependency on the old default.
-2. Run a service standalone without `PFM_TOPIC` set — confirm it now fails
-   fast at startup with a clear Spring placeholder-resolution error.
-3. `docker compose up -d --build` end to end — confirm
+1. `mvn test` across modules — expected to pass unmodified per the above;
+   confirms the reasoning holds in practice.
+2. Run a service standalone without `PFM_TOPIC` set — confirm it starts
+   cleanly and creates/consumes `future-transactions` (the point of this
+   design: the forgotten-env-var case is now a non-event, not a failure).
+3. Rename/remove `common/src/main/resources/pfm-defaults.yml`, rebuild, and
+   confirm the affected service now fails fast at startup with
+   `ConfigDataResourceNotFoundException` — the packaging-defect case this
+   design does guarantee to catch.
+4. `docker compose up -d --build` end to end — confirm
    ingestion → wait-for-topic → processing still sequences correctly with
    the anchor-derived value.
-4. `kubectl apply -f k8s/` on a fresh `kind` cluster — confirm the ConfigMap
+5. `kubectl apply -f k8s/` on a fresh `kind` cluster — confirm the ConfigMap
    is picked up by both deployments and the initContainer still gates
    correctly.
 
 ## Out of scope
 
-- No change to the Java code — it was already clean.
+- No `.java` source changes — only one new YAML resource file
+  (`common/src/main/resources/pfm-defaults.yml`) and edits to existing
+  `application.yml`/manifest/compose files.
 - No Kustomize/templating introduced beyond the one new ConfigMap; k8s
   manifests otherwise stay plain YAML per the existing `k8s/README.md`
   design decisions.
