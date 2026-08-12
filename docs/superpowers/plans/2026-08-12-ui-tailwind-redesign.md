@@ -2097,3 +2097,392 @@ git commit -m "feat(frontend): route GET /api/v1/ingest/status to ingestion-serv
 ```
 
 ---
+
+## Task 11: Tailwind v4 with the validated palette as tokens
+
+**Files:**
+- Modify: `frontend/package.json` (via `npm install`)
+- Create: `frontend/.postcssrc.json`
+- Modify: `frontend/src/styles.css`
+- Create: `frontend/src/app/shared/local-preference.ts`
+- Create: `frontend/src/app/shared/theme.ts`
+- Create: `frontend/src/app/shared/theme-toggle.ts`
+- Test: `frontend/src/app/shared/theme.spec.ts`
+- Test: `frontend/src/app/shared/local-preference.spec.ts`
+
+**Interfaces:**
+- Produces:
+  - `readPreference<T>(key: string, fallback: T): T` and
+    `writePreference<T>(key: string, value: T): void` — used by Tasks 13, 16.
+  - `ThemeStore` (injectable, `providedIn: 'root'`) with
+    `theme: Signal<'light' | 'dark' | 'auto'>` and `cycle(): void`.
+  - `ThemeToggle` standalone component, selector `app-theme-toggle`.
+  - CSS custom properties consumed by every later frontend task:
+    `--surface-1`, `--surface-page`, `--ink-primary`, `--ink-secondary`,
+    `--ink-muted`, `--rule`, `--net-long`, `--net-short`, `--net-flat`,
+    `--status-good`, `--status-warning`, `--status-critical`.
+
+**Colour provenance:** every value below comes from the `dataviz` skill's
+reference palette and was verified with `scripts/validate_palette.js`. The
+diverging pair passes all six checks in both modes — worst-pair CVD ΔE 21.6
+(protan) light / 19.2 dark against a ≥8 target, normal-vision 32.3 / 29.0 against
+a ≥15 floor. **Do not substitute other hexes without re-running that validator.**
+
+Dark values are the palette's own dark steps, not an inversion. The scoping
+pattern below is deliberate: the `:where(:not([data-theme="light"]))` guard lets
+an explicit light choice beat OS-dark, and the `[data-theme="dark"]` block lets an
+explicit dark choice beat OS-light — the toggle must win in both directions.
+
+- [ ] **Step 1: Install Tailwind v4**
+
+```bash
+cd frontend && npm install -D tailwindcss @tailwindcss/postcss postcss
+```
+
+- [ ] **Step 2: Add the PostCSS config**
+
+Create `frontend/.postcssrc.json`:
+
+```json
+{
+  "plugins": {
+    "@tailwindcss/postcss": {}
+  }
+}
+```
+
+Angular 21's `@angular/build:application` builder discovers `.postcssrc.json`
+automatically — `angular.json` needs no change.
+
+- [ ] **Step 3: Write the token layer**
+
+Replace `frontend/src/styles.css` entirely:
+
+```css
+@import "tailwindcss";
+
+/*
+ * Colour tokens from the dataviz reference palette, validated with
+ * scripts/validate_palette.js: the diverging pair clears every check in both
+ * modes (worst-pair CVD ΔE 21.6 protan light / 19.2 dark against a >=8 target).
+ * Do not swap these hexes without re-running that validator.
+ *
+ * Net quantity is polarity data -- net long vs net short around a zero baseline --
+ * so its colour job is diverging (blue <-> red, neutral gray midpoint), not
+ * categorical and not sequential.
+ */
+:root {
+  color-scheme: light;
+  --surface-1: #fcfcfb;
+  --surface-page: #f9f9f7;
+  --ink-primary: #0b0b0b;
+  --ink-secondary: #52514e;
+  --ink-muted: #898781;
+  --rule: #e1e0d9;
+  --net-long: #2a78d6;
+  --net-short: #e34948;
+  --net-flat: #f0efec;
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-critical: #d03b3b;
+}
+
+/* OS preference, but an explicit light choice must still win. */
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --surface-page: #0d0d0d;
+    --ink-primary: #ffffff;
+    --ink-secondary: #c3c2b7;
+    --ink-muted: #898781;
+    --rule: #2c2c2a;
+    --net-long: #3987e5;
+    --net-short: #e66767;
+    --net-flat: #383835;
+  }
+}
+
+/* Explicit dark choice must beat OS-light. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1: #1a1a19;
+  --surface-page: #0d0d0d;
+  --ink-primary: #ffffff;
+  --ink-secondary: #c3c2b7;
+  --ink-muted: #898781;
+  --rule: #2c2c2a;
+  --net-long: #3987e5;
+  --net-short: #e66767;
+  --net-flat: #383835;
+}
+
+/*
+ * @theme inline (not plain @theme) so the generated utilities REFERENCE the
+ * custom properties rather than inlining their values -- required for the
+ * light/dark swap above to take effect on utility classes.
+ */
+@theme inline {
+  --color-surface-1: var(--surface-1);
+  --color-surface-page: var(--surface-page);
+  --color-ink-primary: var(--ink-primary);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-rule: var(--rule);
+  --color-net-long: var(--net-long);
+  --color-net-short: var(--net-short);
+  --color-net-flat: var(--net-flat);
+  --color-status-good: var(--status-good);
+  --color-status-warning: var(--status-warning);
+  --color-status-critical: var(--status-critical);
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  background: var(--surface-page);
+  color: var(--ink-primary);
+  font-family: var(--font-sans);
+}
+
+/* Columns of figures must align vertically; standalone display numbers need not. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+```
+
+- [ ] **Step 4: Write the failing preference-helper test**
+
+Create `frontend/src/app/shared/local-preference.spec.ts`:
+
+```ts
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readPreference, writePreference } from './local-preference';
+
+describe('local-preference', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('returns the fallback when nothing is stored', () => {
+    expect(readPreference('pfm.missing', 'default')).toBe('default');
+  });
+
+  it('round-trips a value', () => {
+    writePreference('pfm.key', { a: 1 });
+    expect(readPreference('pfm.key', null)).toEqual({ a: 1 });
+  });
+
+  it('returns the fallback when the stored value is not valid JSON', () => {
+    localStorage.setItem('pfm.broken', '{not json');
+    expect(readPreference('pfm.broken', 'fallback')).toBe('fallback');
+  });
+
+  it('does not throw when storage is unavailable', () => {
+    // Private browsing can make setItem throw; a preference is never worth a crash.
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    expect(() => writePreference('pfm.key', 'v')).not.toThrow();
+    vi.restoreAllMocks();
+  });
+});
+```
+
+- [ ] **Step 5: Implement the preference helpers**
+
+Create `frontend/src/app/shared/local-preference.ts`:
+
+```ts
+/**
+ * localStorage access that never throws. A stored preference is a convenience;
+ * private-browsing quota errors or hand-corrupted values must degrade to the
+ * caller's fallback rather than break the page.
+ */
+export function readPreference<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : (JSON.parse(raw) as T);
+  } catch {
+    return fallback;
+  }
+}
+
+export function writePreference<T>(key: string, value: T): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Preferences are best-effort.
+  }
+}
+```
+
+- [ ] **Step 6: Write the failing theme test**
+
+Create `frontend/src/app/shared/theme.spec.ts`:
+
+```ts
+import { TestBed } from '@angular/core/testing';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { ThemeStore } from './theme';
+
+describe('ThemeStore', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.documentElement.removeAttribute('data-theme');
+    TestBed.resetTestingModule();
+  });
+
+  it('defaults to auto and stamps no attribute', () => {
+    const store = TestBed.inject(ThemeStore);
+
+    expect(store.theme()).toBe('auto');
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+  });
+
+  it('cycles light -> dark -> auto', () => {
+    const store = TestBed.inject(ThemeStore);
+
+    store.cycle();
+    expect(store.theme()).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+
+    store.cycle();
+    expect(store.theme()).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+
+    store.cycle();
+    expect(store.theme()).toBe('auto');
+    // auto must REMOVE the attribute so the media query governs again.
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+  });
+
+  it('restores a persisted choice on construction', () => {
+    localStorage.setItem('pfm.theme', '"dark"');
+
+    const store = TestBed.inject(ThemeStore);
+
+    expect(store.theme()).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+  });
+});
+```
+
+- [ ] **Step 7: Run both tests to verify they fail**
+
+Run: `cd frontend && npx vitest run src/app/shared`
+Expected: FAIL — cannot resolve `./local-preference` and `./theme`.
+
+- [ ] **Step 8: Implement the theme store and toggle**
+
+Create `frontend/src/app/shared/theme.ts`:
+
+```ts
+import { Injectable, signal } from '@angular/core';
+import { readPreference, writePreference } from './local-preference';
+
+export type Theme = 'light' | 'dark' | 'auto';
+
+const STORAGE_KEY = 'pfm.theme';
+const ORDER: readonly Theme[] = ['auto', 'light', 'dark'];
+
+@Injectable({ providedIn: 'root' })
+export class ThemeStore {
+  private readonly _theme = signal<Theme>(readPreference<Theme>(STORAGE_KEY, 'auto'));
+
+  readonly theme = this._theme.asReadonly();
+
+  constructor() {
+    this.apply(this._theme());
+  }
+
+  cycle(): void {
+    const next = ORDER[(ORDER.indexOf(this._theme()) + 1) % ORDER.length];
+    this._theme.set(next);
+    writePreference(STORAGE_KEY, next);
+    this.apply(next);
+  }
+
+  /**
+   * 'auto' removes the attribute rather than setting a value, so the
+   * prefers-color-scheme media query governs again. Setting data-theme="auto"
+   * would match neither CSS scope and strand the page in light mode.
+   */
+  private apply(theme: Theme): void {
+    if (theme === 'auto') {
+      document.documentElement.removeAttribute('data-theme');
+      return;
+    }
+    document.documentElement.setAttribute('data-theme', theme);
+  }
+}
+```
+
+Create `frontend/src/app/shared/theme-toggle.ts`:
+
+```ts
+import { Component, inject } from '@angular/core';
+import { ThemeStore } from './theme';
+
+@Component({
+  selector: 'app-theme-toggle',
+  template: `
+    <button
+      type="button"
+      data-testid="theme-toggle"
+      class="rounded border border-rule px-2 py-1 text-sm text-ink-secondary hover:text-ink-primary"
+      [attr.aria-label]="'Theme: ' + themeStore.theme() + '. Click to change.'"
+      (click)="themeStore.cycle()"
+    >
+      {{ label() }}
+    </button>
+  `,
+})
+export class ThemeToggle {
+  protected readonly themeStore = inject(ThemeStore);
+
+  protected label(): string {
+    const theme = this.themeStore.theme();
+    if (theme === 'light') return 'Light';
+    if (theme === 'dark') return 'Dark';
+    return 'Auto';
+  }
+}
+```
+
+- [ ] **Step 9: Run the tests to verify they pass**
+
+Run: `cd frontend && npx vitest run src/app/shared`
+Expected: PASS — 7 tests.
+
+- [ ] **Step 10: Verify Tailwind actually compiles**
+
+Run: `cd frontend && npm run build`
+Expected: succeeds. Then confirm the utilities were generated rather than silently
+skipped:
+
+```bash
+grep -o 'net-long' frontend/dist/frontend/browser/*.css | head -1
+```
+
+Expected: a match. No match means PostCSS did not pick up `.postcssrc.json` — the
+build would still succeed with unstyled output, so this check is the one that
+catches it.
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add frontend/package.json frontend/package-lock.json frontend/.postcssrc.json \
+        frontend/src/styles.css frontend/src/app/shared/
+git commit -m "feat(frontend): add Tailwind v4 with the validated palette as theme tokens"
+```
+
+---
