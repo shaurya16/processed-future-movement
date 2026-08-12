@@ -52,6 +52,7 @@ class ProcessingEndToEndTest {
     static void kafkaProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
         registry.add("spring.kafka.streams.application-id", () -> "processing-service-e2e-test");
+        registry.add("processing.topic", () -> "future-transactions");
     }
 
     // processing-service deliberately never creates future-transactions itself (see the k8s
