@@ -1973,10 +1973,15 @@ git commit -m "feat(ingestion-service): expose read-only file provenance at GET 
 
 **Files:**
 - Modify: `frontend/nginx.conf.template`
-- Modify: `frontend/Dockerfile`
 - Modify: `frontend/proxy.conf.json`
 - Modify: `docker-compose.yml`
 - Modify: `k8s/frontend.yaml`
+
+**No `Dockerfile` change is needed.** `frontend/Dockerfile` copies the template to
+`/etc/nginx/templates/default.conf.template` and relies on the nginx image's own
+`20-envsubst-on-templates.sh` entrypoint, which substitutes **every** environment
+variable present — there is no explicit variable list to extend. Setting
+`INGESTION_SERVICE_UPSTREAM` in the environment is sufficient.
 
 **Interfaces:**
 - Consumes: `GET /api/v1/ingest/status` (Task 9).
@@ -2020,18 +2025,7 @@ server {
 }
 ```
 
-- [ ] **Step 2: Add the variable to the Dockerfile's `envsubst` list**
-
-In `frontend/Dockerfile`, find the `envsubst` invocation and add
-`${INGESTION_SERVICE_UPSTREAM}` to its variable list alongside
-`${PROCESSING_SERVICE_UPSTREAM}` and `${NGINX_LOCAL_RESOLVERS}`. If the list is
-passed as a single quoted string, it becomes e.g.
-`'${PROCESSING_SERVICE_UPSTREAM} ${INGESTION_SERVICE_UPSTREAM} ${NGINX_LOCAL_RESOLVERS}'`.
-
-Getting this wrong is silent: `envsubst` leaves the literal `${...}` in place and
-nginx fails to start with an invalid `proxy_pass`. Step 6 catches it.
-
-- [ ] **Step 3: Set the variable in docker-compose**
+- [ ] **Step 2: Set the variable in docker-compose**
 
 In `docker-compose.yml`, under the `frontend` service's `environment:` block, add:
 
@@ -2039,7 +2033,7 @@ In `docker-compose.yml`, under the `frontend` service's `environment:` block, ad
       INGESTION_SERVICE_UPSTREAM: http://ingestion-service:8081
 ```
 
-- [ ] **Step 4: Set the variable in the k8s deployment**
+- [ ] **Step 3: Set the variable in the k8s deployment**
 
 In `k8s/frontend.yaml`, alongside the existing `PROCESSING_SERVICE_UPSTREAM` env
 entry on the container:
@@ -2049,7 +2043,7 @@ entry on the container:
               value: http://ingestion-service:8081
 ```
 
-- [ ] **Step 5: Add the dev-server proxy entry**
+- [ ] **Step 4: Add the dev-server proxy entry**
 
 Replace `frontend/proxy.conf.json`. The more specific key must come first:
 
@@ -2066,7 +2060,7 @@ Replace `frontend/proxy.conf.json`. The more specific key must come first:
 }
 ```
 
-- [ ] **Step 6: Verify routing end to end**
+- [ ] **Step 5: Verify routing end to end**
 
 ```bash
 docker compose down -v --remove-orphans
@@ -2092,7 +2086,7 @@ Expected: `200`, a JSON body containing `"configuredPath":"sample-data/Input.txt
 `200`, then `404`. If nginx failed to start, `docker compose logs frontend` will
 show an unresolved `${INGESTION_SERVICE_UPSTREAM}` — revisit Step 2.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/nginx.conf.template frontend/Dockerfile frontend/proxy.conf.json \
