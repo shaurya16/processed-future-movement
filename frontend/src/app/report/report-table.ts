@@ -4,7 +4,7 @@ import { ReportFilters } from './report-filters';
 import { ColumnDef } from './report-columns';
 import { ReportEntry } from './report-entry';
 import { BarGeometry, ExpiryBadge, barGeometry, changedKeys, expiryBadge } from './cell-view';
-import { formatDateTime } from './format';
+import { formatDate, formatDateTime } from './format';
 
 @Component({
   selector: 'app-report-table',
@@ -52,8 +52,12 @@ export class ReportTable {
 
   protected cellText(column: ColumnDef, entry: ReportEntry): string {
     const value = column.sortValue(entry);
+    const stringValue = typeof value === 'string' && value !== '' ? value : null;
     if (column.render === 'date') {
-      return formatDateTime(typeof value === 'string' && value !== '' ? value : null);
+      return formatDate(stringValue);
+    }
+    if (column.render === 'dateTime') {
+      return formatDateTime(stringValue);
     }
     return String(value);
   }
@@ -72,6 +76,12 @@ export class ReportTable {
   }
 
   protected rowKey(entry: ReportEntry): string {
-    return entry.Client_Information + '|' + entry.Product_Information;
+    // Built from the eight discrete fields, not the concatenations: those are
+    // trimmed and variable-width, so distinct keys can collide (CL|4321 and
+    // CL4|321 both concatenate to CL4321...).
+    return [
+      entry.clientType, entry.clientNumber, entry.accountNumber, entry.subaccountNumber,
+      entry.exchangeCode, entry.productGroupCode, entry.symbol, entry.expirationDate,
+    ].join('|');
   }
 }

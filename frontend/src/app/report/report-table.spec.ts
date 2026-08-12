@@ -132,6 +132,46 @@ describe('ReportTable', () => {
     expect(fixture.nativeElement.textContent).toContain('No rows match');
   });
 
+  it('shows the genuinely-empty message when there are no rows and no filters', async () => {
+    const { filters } = setup([]);
+    filters.totalCount.set(0);
+    filters.activeFilterCount.set(0);
+    const fixture = TestBed.createComponent(ReportTable);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('No transactions recorded yet');
+    expect(fixture.nativeElement.textContent).not.toContain('No rows match');
+  });
+
+  it('gives entries that share concatenations but differ in field split distinct row keys', async () => {
+    // 'CL' + '4321' + '0002' + '0001' and 'CL4' + '321' + '0002' + '0001' both
+    // concatenate to the same Client_Information string, which is exactly the
+    // collision rowKey must no longer be vulnerable to.
+    const rows = [
+      row({
+        Client_Information: 'CL432100020001',
+        clientType: 'CL',
+        clientNumber: '4321',
+        accountNumber: '0002',
+        subaccountNumber: '0001',
+      }),
+      row({
+        Client_Information: 'CL432100020001',
+        clientType: 'CL4',
+        clientNumber: '321',
+        accountNumber: '0002',
+        subaccountNumber: '0001',
+      }),
+    ];
+    setup(rows);
+    const fixture = TestBed.createComponent(ReportTable);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelectorAll('tbody tr').length).toBe(2);
+  });
+
   it('shows the expiry badge relative to trade date', async () => {
     setup([row({ expirationDate: '2010-08-22', lastTransactionDate: '2010-08-20' })], [
       'expirationDate',

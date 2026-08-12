@@ -67,6 +67,9 @@ export class KpiRow {
    * suppressed otherwise rather than crying wolf.
    */
   protected readonly reconciliationMismatch = computed(() => {
+    // Comparing a filtered subtotal against the whole file's published count would
+    // always "mismatch"; the check is only meaningful over the unfiltered set.
+    if (this.filters.activeFilterCount() > 0) return false;
     const published = this.published();
     if (published === null) return false;
     return published !== this.transactions();

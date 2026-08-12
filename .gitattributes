@@ -1,0 +1,13 @@
+# These fixtures are asserted byte-for-byte against real runtime output
+# (FullPipelineGoldenTest, CsvFixtureDriftTest) or parsed by a fixed-width
+# parser that depends on exact line lengths (the ingestion-service tests).
+# Their line endings are part of the contract and intentionally differ from
+# each other, so git must never normalize them on checkout: a clone with
+# core.autocrlf=true would otherwise rewrite both, silently breaking the CSV
+# byte-equality assertions and the fixed-width parser alike.
+sample-output/Output.csv text eol=lf
+sample-data/Input.txt text eol=crlf
+processing-service/src/test/resources/Output.csv text eol=lf
+processing-service/src/test/resources/Input.txt text eol=crlf
+ingestion-service/src/test/resources/Input.txt text eol=crlf
+common/src/test/resources/Input.txt text eol=crlf

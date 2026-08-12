@@ -1,5 +1,9 @@
 const EM_DASH = '—';
 
+const MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
 export function formatBytes(bytes: number | null): string {
   if (bytes === null) return EM_DASH;
   if (bytes < 1024) return `${bytes} B`;
@@ -18,6 +22,20 @@ export function formatDateTime(iso: string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+/**
+ * Date-only ISO strings (LocalDate, e.g. "2010-09-10") must NOT go through
+ * formatDateTime: `new Date('2010-09-10')` is UTC midnight, so a negative-offset
+ * timezone renders the previous day plus a meaningless time.
+ */
+export function formatDate(iso: string | null): string {
+  if (!iso) return EM_DASH;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!match) return EM_DASH;
+  const [, year, month, day] = match;
+  const monthName = MONTHS[Number(month) - 1];
+  return monthName ? `${day} ${monthName} ${year}` : EM_DASH;
 }
 
 /** @param now injected so tests are deterministic. */
