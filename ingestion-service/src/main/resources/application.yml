@@ -4,12 +4,14 @@ server:
 spring:
   application:
     name: ingestion-service
+  config:
+    import: classpath:pfm-defaults.yml
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
 ingestion:
   file-path: ${INGESTION_FILE_PATH:sample-data/Input.txt}
-  topic: future-transactions
+  topic: ${pfm.topic}
 
 management:
   endpoint:
