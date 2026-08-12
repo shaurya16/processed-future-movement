@@ -12,7 +12,7 @@ spring:
         processing.guarantee: exactly_once_v2
 
 processing:
-  topic: ${PFM_TOPIC}
+  topic: future-transactions
 
 management:
   endpoint:

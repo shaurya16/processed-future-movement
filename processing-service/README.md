@@ -17,7 +17,7 @@ Run these from the **repo root**:
 ```bash
 docker compose up -d kafka
 mvn -q -DskipTests install
-PFM_TOPIC=future-transactions mvn -pl processing-service spring-boot:run
+mvn -pl processing-service spring-boot:run
 ```
 
 In a separate terminal, once `ingestion-service` has published some records (see its
