@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pfm-topic-config
+  namespace: pfm
+data:
+  PFM_TOPIC: future-transactions

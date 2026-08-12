@@ -34,6 +34,11 @@ still `Init:0/1` after more than a minute or two, Kafka itself is likely broken 
 `kubectl logs -n pfm <pod> -c wait-for-topic` for the repeating "waiting for
 future-transactions topic..." line versus signs Kafka never came up.
 
+The topic name is defined once, in `k8s/01-topic-config.yaml`'s
+`pfm-topic-config` ConfigMap, and referenced by `ingestion-service`,
+`processing-service`, and this init container via a `PFM_TOPIC` env var —
+not hardcoded per-manifest.
+
 `ingestion-service` has no equivalent init container guarding it against a not-yet-ready
 Kafka broker on a cold `kubectl apply -f k8s/`. This was deliberately not added: its
 Kafka producer uses the client defaults (effectively-infinite retries bounded by a
