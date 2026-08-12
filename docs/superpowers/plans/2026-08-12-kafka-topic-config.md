@@ -2,40 +2,70 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Collapse the Kafka topic name `future-transactions`, currently declared independently in four places, down to one declaration per environment (app config, Docker Compose, Kubernetes), so a forgotten update fails loudly at startup instead of silently misconfiguring the pipeline.
+**Goal:** Collapse the Kafka topic name `future-transactions`, currently declared independently in four places, down to one declaration per environment (Java config, Docker Compose, Kubernetes), so the two services can never disagree on the topic name — whether or not a deploy-time override is set.
 
-**Architecture:** Both Spring Boot services switch from a hardcoded `application.yml` literal to a required `${PFM_TOPIC}` placeholder with no default (fails fast if unset). Docker Compose gets a single YAML anchor referenced by all three services that need the topic name. Kubernetes gets a new ConfigMap referenced via `configMapKeyRef` by both deployments and the `wait-for-topic` initContainer, since a YAML anchor can't span the separate manifest files. No production Java code changes — the duplication was purely in config.
+**Architecture:** Both Spring Boot services import a new shared classpath resource (`common/src/main/resources/pfm-defaults.yml`) via `spring.config.import` and reference its `pfm.topic` property instead of owning their own literal. This makes drift between the two services structurally impossible, and gives a genuine, framework-guaranteed fail-fast (`ConfigDataResourceNotFoundException`, verified empirically) if that shared resource is ever missing from the packaged jar. Docker Compose gets a single YAML anchor referenced by all three services that need the topic name, for deploy-time overrides. Kubernetes gets a new ConfigMap referenced via `configMapKeyRef` by both deployments and the `wait-for-topic` initContainer, for the same reason, since a YAML anchor can't span the separate manifest files. No `.java` source changes — the duplication was purely in config, and the fix is purely config plus one new YAML resource.
 
-**Tech Stack:** Spring Boot `@ConfigurationProperties`, Docker Compose YAML anchors, Kubernetes ConfigMap.
+**Tech Stack:** Spring Boot `@ConfigurationProperties`, `spring.config.import`, Docker Compose YAML anchors, Kubernetes ConfigMap.
 
 ## Global Constraints
 
 - The topic name itself does not change — it stays `future-transactions` everywhere; only how it's declared changes.
-- No default value for `ingestion.topic` / `processing.topic` in `application.yml` — an unset `PFM_TOPIC` must fail Spring context startup, not silently fall back.
-- No change to `src/main` Java code in either service (`IngestionProperties`, `ProcessingProperties` already read the property correctly).
+- The literal `future-transactions` default exists in exactly one place: `common/src/main/resources/pfm-defaults.yml`'s `pfm.topic: ${PFM_TOPIC:future-transactions}`. Neither service's own `application.yml` may redeclare it — each references `${pfm.topic}` after importing that file.
+- No `.java` source changes anywhere in this plan — only the one new YAML resource file plus edits to existing `application.yml` / Docker Compose / Kubernetes manifest files.
 
-Design doc: [docs/superpowers/specs/2026-08-12-kafka-topic-config-design.md](../specs/2026-08-12-kafka-topic-config-design.md)
+Design doc: [docs/superpowers/specs/2026-08-12-kafka-topic-config-design.md](../specs/2026-08-12-kafka-topic-config-design.md) — see "Revision history" section for why the originally-approved `${PFM_TOPIC}`-with-no-default mechanism was replaced with this one (it turned out not to actually fail Spring context startup).
 
 ---
 
-### Task 1: ingestion-service — required `PFM_TOPIC` property
+### Task 1: shared topic default in `common` + `ingestion-service` wiring
 
 **Files:**
-- Modify: `ingestion-service/src/main/resources/application.yml:12`
-- Modify: `ingestion-service/src/test/java/com/pfm/ingestion/IngestionServiceApplicationTests.java:12-14`
-- Modify: `ingestion-service/src/test/java/com/pfm/ingestion/kafka/KafkaConfigTest.java:13`
-- Modify: `ingestion-service/src/test/java/com/pfm/ingestion/IngestionEndToEndTest.java` (the `@DynamicPropertySource` method)
-- Modify: `ingestion-service/README.md:19`
+- Create: `common/src/main/resources/pfm-defaults.yml`
+- Modify: `ingestion-service/src/main/resources/application.yml`
 
 **Interfaces:**
 - Consumes: nothing from other tasks.
-- Produces: `ingestion.topic` now resolves from the `PFM_TOPIC` env var with no fallback. Task 3 (Compose) and Task 4 (k8s) both rely on this — they must supply `PFM_TOPIC` in the container environment or `ingestion-service` will fail to start.
+- Produces: a classpath resource `pfm-defaults.yml` (packaged into `common`'s jar) exposing property `pfm.topic`, resolved as `${PFM_TOPIC:future-transactions}`. Task 2 (`processing-service`) imports this same file — do not create a second copy. `ingestion.topic` now resolves to `${pfm.topic}` via that import.
 
-- [ ] **Step 1: Remove the hardcoded default in `application.yml`**
+No test or README changes are expected in this task — see the design doc's "Testing" section for why: the resolved value is identical to what these files already had before this plan started, so nothing observable changes for anything that doesn't explicitly override the topic.
+
+- [ ] **Step 1: Create the shared defaults resource**
+
+`common` currently has no `src/main/resources` directory — create it and
+add the file:
+
+Create `common/src/main/resources/pfm-defaults.yml`:
+
+```yaml
+pfm:
+  topic: ${PFM_TOPIC:future-transactions}
+```
+
+- [ ] **Step 2: Build and install `common` so the new resource is on the local classpath**
+
+Run: `mvn -q -pl common -am -DskipTests install`
+
+Expected: BUILD SUCCESS, no output beyond Maven's own warnings. Confirm the
+resource made it into the installed jar:
+
+```bash
+unzip -l ~/.m2/repository/com/pfm/common/0.1.0-SNAPSHOT/common-0.1.0-SNAPSHOT.jar | grep pfm-defaults.yml
+```
+
+Expected: one line showing `pfm-defaults.yml` in the jar listing.
+
+- [ ] **Step 3: Wire `ingestion-service` to import it**
 
 In `ingestion-service/src/main/resources/application.yml`, change:
 
 ```yaml
+spring:
+  application:
+    name: ingestion-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
 ingestion:
   file-path: ${INGESTION_FILE_PATH:sample-data/Input.txt}
   topic: future-transactions
@@ -44,141 +74,114 @@ ingestion:
 to:
 
 ```yaml
+spring:
+  application:
+    name: ingestion-service
+  config:
+    import: classpath:pfm-defaults.yml
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
 ingestion:
   file-path: ${INGESTION_FILE_PATH:sample-data/Input.txt}
-  topic: ${PFM_TOPIC}
+  topic: ${pfm.topic}
 ```
 
-- [ ] **Step 2: Run the test suite and confirm it fails for the right reason**
+- [ ] **Step 4: Run the test suite and confirm nothing broke**
 
 Run: `mvn -pl ingestion-service -am test`
 
-Expected: FAIL. `IngestionServiceApplicationTests`, `KafkaConfigTest`, and
-`IngestionEndToEndTest` should each fail during Spring context startup with
-an error resolving the placeholder `'PFM_TOPIC'` (e.g.
-`IllegalArgumentException: Could not resolve placeholder 'PFM_TOPIC'`). This
-confirms the property is now genuinely required, and identifies exactly the
-three tests that were silently relying on the old default.
+Expected: PASS — the same tests that passed before this task
+(`IngestionServiceApplicationTests`, `KafkaConfigTest`,
+`IngestionEndToEndTest`, and the rest) continue to pass unmodified. If any
+of them fail, stop: it means `${pfm.topic}` is not resolving the way this
+task expects, and that's a real problem to understand before proceeding —
+not something to patch over by adding explicit topic properties back into
+the tests.
 
-- [ ] **Step 3: Make each affected test set `ingestion.topic` explicitly**
-
-In `IngestionServiceApplicationTests.java`, change:
-
-```java
-@SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "spring.kafka.admin.auto-create=false")
-```
-
-to:
-
-```java
-@SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"spring.kafka.admin.auto-create=false", "ingestion.topic=future-transactions"})
-```
-
-In `KafkaConfigTest.java`, change:
-
-```java
-@SpringBootTest(properties = "spring.kafka.admin.auto-create=false")
-```
-
-to:
-
-```java
-@SpringBootTest(properties = {"spring.kafka.admin.auto-create=false", "ingestion.topic=future-transactions"})
-```
-
-In `IngestionEndToEndTest.java`, change:
-
-```java
-    @DynamicPropertySource
-    static void kafkaProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
-        registry.add("ingestion.file-path", IngestionEndToEndTest::sampleFilePath);
-    }
-```
-
-to:
-
-```java
-    @DynamicPropertySource
-    static void kafkaProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
-        registry.add("ingestion.file-path", IngestionEndToEndTest::sampleFilePath);
-        registry.add("ingestion.topic", () -> "future-transactions");
-    }
-```
-
-- [ ] **Step 4: Run the test suite again and confirm it passes**
-
-Run: `mvn -pl ingestion-service -am test`
-
-Expected: PASS, all tests including `IngestionServiceApplicationTests`,
-`KafkaConfigTest`, and `IngestionEndToEndTest`.
-
-- [ ] **Step 5: Update the README's standalone run command**
-
-In `ingestion-service/README.md`, change:
-
-```bash
-INGESTION_FILE_PATH="$PWD/sample-data/Input.txt" mvn -pl ingestion-service spring-boot:run
-```
-
-to:
-
-```bash
-PFM_TOPIC=future-transactions INGESTION_FILE_PATH="$PWD/sample-data/Input.txt" mvn -pl ingestion-service spring-boot:run
-```
-
-- [ ] **Step 6: Manually confirm the fail-fast behavior**
+- [ ] **Step 5: Manually confirm the forgotten-env-var case is now harmless**
 
 Run (deliberately omitting `PFM_TOPIC`):
 
 ```bash
 docker compose up -d kafka
-mvn -q -DskipTests install
 mvn -pl ingestion-service spring-boot:run
 ```
 
-Expected: the app fails to start with a clear Spring error naming the
-unresolved `PFM_TOPIC` placeholder — not a silent empty/default topic.
-Then confirm the documented command from Step 5 (with `PFM_TOPIC` set)
-starts cleanly. Stop the process (`Ctrl+C`) once confirmed;
-`docker compose down` afterward if nothing else in this session needs Kafka
-running.
+Expected: starts cleanly (`Started IngestionServiceApplication...`),
+`curl -s http://localhost:8081/actuator/health/readiness` reports
+`{"status":"UP"}`, and the topic was actually created under the right name:
+
+```bash
+docker exec pfm-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+```
+
+Expected output: `future-transactions` (not a literal `${PFM_TOPIC}` or
+`${pfm.topic}` — if you see either of those strings, the import isn't
+resolving and something is wrong). Stop the process (`Ctrl+C`) once
+confirmed.
+
+- [ ] **Step 6: Manually confirm the missing-resource case genuinely fails fast**
+
+This simulates a packaging defect (the shared resource not making it into
+`common`'s jar). Use a real move out of the resources directory, not a
+rename within it — `mvn install` does not clean stale files out of
+`target/classes`, so renaming in place (e.g. to `.bak`) leaves the old file
+on the classpath and silently invalidates this check.
+
+```bash
+mv common/src/main/resources/pfm-defaults.yml /tmp/pfm-defaults.yml.stash
+mvn -q -pl common clean install -DskipTests
+mvn -pl ingestion-service spring-boot:run
+```
+
+Expected: `APPLICATION FAILED TO START`, naming
+`Config data resource 'class path resource [pfm-defaults.yml]' ... does not exist`,
+process exits non-zero. Then restore and rebuild clean before moving on:
+
+```bash
+mv /tmp/pfm-defaults.yml.stash common/src/main/resources/pfm-defaults.yml
+mvn -q -pl common clean install -DskipTests
+docker compose down
+```
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add ingestion-service/src/main/resources/application.yml \
-        ingestion-service/src/test/java/com/pfm/ingestion/IngestionServiceApplicationTests.java \
-        ingestion-service/src/test/java/com/pfm/ingestion/kafka/KafkaConfigTest.java \
-        ingestion-service/src/test/java/com/pfm/ingestion/IngestionEndToEndTest.java \
-        ingestion-service/README.md
-git commit -m "feat(ingestion-service): require PFM_TOPIC, drop hardcoded topic default"
+git add common/src/main/resources/pfm-defaults.yml \
+        ingestion-service/src/main/resources/application.yml
+git commit -m "feat(common,ingestion-service): single-source the Kafka topic default"
 ```
 
 ---
 
-### Task 2: processing-service — required `PFM_TOPIC` property
+### Task 2: processing-service — wire to the shared topic default
 
 **Files:**
-- Modify: `processing-service/src/main/resources/application.yml:15`
-- Modify: `processing-service/src/test/java/com/pfm/processing/ProcessingServiceApplicationTests.java:12-14`
-- Modify: `processing-service/src/test/java/com/pfm/processing/ProcessingEndToEndTest.java` (the `@DynamicPropertySource` method)
-- Modify: `processing-service/README.md:20`
+- Modify: `processing-service/src/main/resources/application.yml`
 
 **Interfaces:**
-- Consumes: nothing from other tasks (independent of Task 1 — different module, different property prefix).
-- Produces: `processing.topic` now resolves from the `PFM_TOPIC` env var with no fallback. Task 3 and Task 4 both rely on this.
+- Consumes: `common/src/main/resources/pfm-defaults.yml` (Task 1) — the file must already exist and be installed to the local `.m2` repo before this task starts (it will be, since Task 1 runs first).
+- Produces: `processing.topic` now resolves to `${pfm.topic}` via the same shared import. Nothing else consumes this directly.
 
-- [ ] **Step 1: Remove the hardcoded default in `application.yml`**
+No test or README changes are expected in this task, for the same reason as
+Task 1.
+
+- [ ] **Step 1: Wire `processing-service` to import the shared defaults**
 
 In `processing-service/src/main/resources/application.yml`, change:
 
 ```yaml
+spring:
+  application:
+    name: processing-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    streams:
+      application-id: processing-service
+      properties:
+        processing.guarantee: exactly_once_v2
+
 processing:
   topic: future-transactions
 ```
@@ -186,92 +189,83 @@ processing:
 to:
 
 ```yaml
+spring:
+  application:
+    name: processing-service
+  config:
+    import: classpath:pfm-defaults.yml
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    streams:
+      application-id: processing-service
+      properties:
+        processing.guarantee: exactly_once_v2
+
 processing:
-  topic: ${PFM_TOPIC}
+  topic: ${pfm.topic}
 ```
 
-- [ ] **Step 2: Run the test suite and confirm it fails for the right reason**
+- [ ] **Step 2: Run the test suite and confirm nothing broke**
 
 Run: `mvn -pl processing-service -am test`
 
-Expected: FAIL. `ProcessingServiceApplicationTests` and
-`ProcessingEndToEndTest` should each fail during Spring context startup
-with an error resolving the placeholder `'PFM_TOPIC'`.
-`FullPipelineGoldenTest` should still PASS unaffected — it already sets
-`processing.topic=future-transactions` (and `ingestion.topic=future-transactions`)
-as explicit properties and disables default config-file loading, so it
-never depended on the `application.yml` default in the first place. If it
-fails too, stop and re-examine — that would mean this change has a wider
-blast radius than expected.
+Expected: PASS — `ProcessingServiceApplicationTests`,
+`ProcessingEndToEndTest`, and `FullPipelineGoldenTest` all continue to pass
+unmodified. `FullPipelineGoldenTest` in particular sets `processing.topic`
+directly as an explicit property and disables default config-file loading,
+so it never goes through this import at all — it passing is expected and
+not itself proof the import works; the other two tests are what actually
+exercise it. If anything fails, stop and understand why before proceeding.
 
-- [ ] **Step 3: Make each affected test set `processing.topic` explicitly**
+- [ ] **Step 3: Manually confirm the forgotten-env-var case is now harmless**
 
-In `ProcessingServiceApplicationTests.java`, change:
-
-```java
-@SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "spring.kafka.streams.auto-startup=false")
-```
-
-to:
-
-```java
-@SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"spring.kafka.streams.auto-startup=false", "processing.topic=future-transactions"})
-```
-
-In `ProcessingEndToEndTest.java`, change:
-
-```java
-    @DynamicPropertySource
-    static void kafkaProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
-        registry.add("spring.kafka.streams.application-id", () -> "processing-service-e2e-test");
-    }
-```
-
-to:
-
-```java
-    @DynamicPropertySource
-    static void kafkaProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
-        registry.add("spring.kafka.streams.application-id", () -> "processing-service-e2e-test");
-        registry.add("processing.topic", () -> "future-transactions");
-    }
-```
-
-- [ ] **Step 4: Run the test suite again and confirm it passes**
-
-Run: `mvn -pl processing-service -am test`
-
-Expected: PASS, all tests including `ProcessingServiceApplicationTests`,
-`ProcessingEndToEndTest`, and `FullPipelineGoldenTest`.
-
-- [ ] **Step 5: Update the README's standalone run command**
-
-In `processing-service/README.md`, change:
+`processing-service` deliberately never creates the topic itself (see
+`k8s/README.md`), so precreate it before starting the service standalone —
+starting Kafka Streams against a not-yet-existing source topic is a known
+separate flakiness hazard unrelated to this task
+(see `ProcessingEndToEndTest`'s `createFutureTransactionsTopic` comment).
 
 ```bash
+docker compose up -d kafka
+docker exec pfm-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
+  --create --topic future-transactions --partitions 3 --replication-factor 1
 mvn -pl processing-service spring-boot:run
 ```
 
-to:
+Expected (deliberately omitting `PFM_TOPIC`): starts cleanly, and within a
+few seconds `curl -s http://localhost:8082/actuator/health/readiness`
+reports `{"status":"UP"}` (Kafka Streams reaches `RUNNING`). No
+`InvalidTopicException` or `Missing source topics` in the log. Stop the
+process (`Ctrl+C`) once confirmed.
+
+- [ ] **Step 4: Manually confirm the missing-resource case still fails fast**
+
+Same check as Task 1 Step 6, run again here because `processing-service` is
+a separate module with its own dependency resolution — confirming it here
+is not redundant, it's verifying the import actually took effect in this
+module too.
 
 ```bash
-PFM_TOPIC=future-transactions mvn -pl processing-service spring-boot:run
+mv common/src/main/resources/pfm-defaults.yml /tmp/pfm-defaults.yml.stash
+mvn -q -pl common clean install -DskipTests
+mvn -pl processing-service spring-boot:run
 ```
 
-- [ ] **Step 6: Commit**
+Expected: `APPLICATION FAILED TO START` naming the missing
+`pfm-defaults.yml` config data resource, process exits non-zero. Then
+restore:
 
 ```bash
-git add processing-service/src/main/resources/application.yml \
-        processing-service/src/test/java/com/pfm/processing/ProcessingServiceApplicationTests.java \
-        processing-service/src/test/java/com/pfm/processing/ProcessingEndToEndTest.java \
-        processing-service/README.md
-git commit -m "feat(processing-service): require PFM_TOPIC, drop hardcoded topic default"
+mv /tmp/pfm-defaults.yml.stash common/src/main/resources/pfm-defaults.yml
+mvn -q -pl common clean install -DskipTests
+docker compose down
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add processing-service/src/main/resources/application.yml
+git commit -m "feat(processing-service): single-source the Kafka topic default"
 ```
 
 ---
@@ -282,7 +276,7 @@ git commit -m "feat(processing-service): require PFM_TOPIC, drop hardcoded topic
 - Modify: `docker-compose.yml`
 
 **Interfaces:**
-- Consumes: `ingestion-service` and `processing-service` now require `PFM_TOPIC` in their container environment (Tasks 1 and 2) or they fail to start.
+- Consumes: both services now resolve their topic via the shared `common/pfm-defaults.yml` import (Tasks 1 and 2), which falls back to `future-transactions` if `PFM_TOPIC` isn't set — so this task's `PFM_TOPIC` values aren't load-bearing for startup, they're for explicitness and future per-deployment overrides. The literal value used here must still match the shared default (`future-transactions`) for that fallback consistency to mean anything.
 - Produces: nothing consumed by later tasks (k8s in Task 4 is a separate manifest set).
 
 - [ ] **Step 1: Add the anchor and wire it into all three services**
@@ -392,9 +386,12 @@ git commit -m "feat(docker-compose): single-source the Kafka topic name via a YA
 - Modify: `k8s/README.md`
 
 **Interfaces:**
-- Consumes: `ingestion-service` and `processing-service` now require
-  `PFM_TOPIC` in their container environment (Tasks 1 and 2) or they fail to
-  start.
+- Consumes: both services now resolve their topic via the shared
+  `common/pfm-defaults.yml` import (Tasks 1 and 2), which falls back to
+  `future-transactions` if `PFM_TOPIC` isn't set — so, as with Task 3, this
+  ConfigMap's value isn't load-bearing for startup, it's for explicitness
+  and future per-deployment overrides. It must still match the shared
+  default (`future-transactions`).
 - Produces: nothing consumed by later tasks (this is the last task).
 
 Note on the filename: the existing `k8s/00-namespace.yaml` uses a numeric
