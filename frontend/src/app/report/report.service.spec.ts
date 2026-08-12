@@ -36,7 +36,7 @@ describe('ReportService', () => {
     ];
 
     service.load();
-    httpMock.expectOne('/api/report').flush(
+    httpMock.expectOne('/api/v1/report').flush(
       { error: 'not ready' },
       { status: 503, statusText: 'Service Unavailable' },
     );
@@ -45,7 +45,7 @@ describe('ReportService', () => {
 
     await vi.advanceTimersByTimeAsync(3000);
     expect(service.retryCount()).toBe(1);
-    httpMock.expectOne('/api/report').flush(
+    httpMock.expectOne('/api/v1/report').flush(
       { error: 'not ready' },
       { status: 503, statusText: 'Service Unavailable' },
     );
@@ -53,7 +53,7 @@ describe('ReportService', () => {
 
     await vi.advanceTimersByTimeAsync(3000);
     expect(service.retryCount()).toBe(2);
-    httpMock.expectOne('/api/report').flush(sample);
+    httpMock.expectOne('/api/v1/report').flush(sample);
 
     expect(service.status()).toBe('ready');
     expect(service.entries()).toEqual(sample);
@@ -64,7 +64,7 @@ describe('ReportService', () => {
     service.load();
 
     for (let i = 1; i <= 15; i++) {
-      httpMock.expectOne('/api/report').flush(
+      httpMock.expectOne('/api/v1/report').flush(
         { error: 'not ready' },
         { status: 503, statusText: 'Service Unavailable' },
       );
@@ -74,26 +74,26 @@ describe('ReportService', () => {
     }
 
     // Still polling indefinitely — no cap introduced.
-    httpMock.expectOne('/api/report').flush([]);
+    httpMock.expectOne('/api/v1/report').flush([]);
     expect(service.status()).toBe('ready');
     expect(service.retryCount()).toBe(15);
   });
 
   it('resets retryCount to 0 when load() is called fresh after retries', async () => {
     service.load();
-    httpMock.expectOne('/api/report').flush(
+    httpMock.expectOne('/api/v1/report').flush(
       { error: 'not ready' },
       { status: 503, statusText: 'Service Unavailable' },
     );
     await vi.advanceTimersByTimeAsync(3000);
     expect(service.retryCount()).toBe(1);
-    httpMock.expectOne('/api/report').flush(
+    httpMock.expectOne('/api/v1/report').flush(
       { error: 'not ready' },
       { status: 503, statusText: 'Service Unavailable' },
     );
     await vi.advanceTimersByTimeAsync(3000);
     expect(service.retryCount()).toBe(2);
-    httpMock.expectOne('/api/report').flush(
+    httpMock.expectOne('/api/v1/report').flush(
       { error: 'not ready' },
       { status: 503, statusText: 'Service Unavailable' },
     );
@@ -102,21 +102,21 @@ describe('ReportService', () => {
     // even though the previous polling sequence's retry timer is still pending.
     service.load();
     expect(service.retryCount()).toBe(0);
-    httpMock.expectOne('/api/report').flush([]);
+    httpMock.expectOne('/api/v1/report').flush([]);
     expect(service.status()).toBe('ready');
     expect(service.retryCount()).toBe(0);
   });
 
   it('resets retryCount to 0 when a fresh load() follows a non-retryable error', () => {
     service.load();
-    httpMock.expectOne('/api/report').flush(
+    httpMock.expectOne('/api/v1/report').flush(
       { error: 'not ready' },
       { status: 503, statusText: 'Service Unavailable' },
     );
 
     service.load();
     expect(service.retryCount()).toBe(0);
-    httpMock.expectOne('/api/report').flush(
+    httpMock.expectOne('/api/v1/report').flush(
       { error: 'boom' },
       { status: 500, statusText: 'Internal Server Error' },
     );
@@ -126,7 +126,7 @@ describe('ReportService', () => {
 
   it('treats a 200 with an empty array as ready, not loading', () => {
     service.load();
-    httpMock.expectOne('/api/report').flush([]);
+    httpMock.expectOne('/api/v1/report').flush([]);
 
     expect(service.status()).toBe('ready');
     expect(service.entries()).toEqual([]);
@@ -134,7 +134,7 @@ describe('ReportService', () => {
 
   it('treats a non-503 error as an error state and stops retrying', async () => {
     service.load();
-    httpMock.expectOne('/api/report').flush(
+    httpMock.expectOne('/api/v1/report').flush(
       { error: 'boom' },
       { status: 500, statusText: 'Internal Server Error' },
     );
@@ -143,17 +143,17 @@ describe('ReportService', () => {
     expect(service.errorMessage()).toBeTruthy();
 
     await vi.advanceTimersByTimeAsync(10000);
-    httpMock.expectNone('/api/report');
+    httpMock.expectNone('/api/v1/report');
   });
 
   it('load() called again from an error state retries the request', () => {
     service.load();
-    httpMock.expectOne('/api/report').flush(null, { status: 500, statusText: 'Internal Server Error' });
+    httpMock.expectOne('/api/v1/report').flush(null, { status: 500, statusText: 'Internal Server Error' });
     expect(service.status()).toBe('error');
 
     service.load();
     expect(service.status()).toBe('loading');
-    httpMock.expectOne('/api/report').flush([]);
+    httpMock.expectOne('/api/v1/report').flush([]);
     expect(service.status()).toBe('ready');
   });
 });

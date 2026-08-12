@@ -95,7 +95,7 @@ describe('Report', () => {
       'a[data-testid="csv-download"]',
     );
     expect(csvLink).not.toBeNull();
-    expect(csvLink.getAttribute('href')).toBe('/api/report/csv');
+    expect(csvLink.getAttribute('href')).toBe('/api/v1/report/csv');
 
     const refreshButton: HTMLButtonElement = fixture.nativeElement.querySelector(
       'button[data-testid="refresh"]',

@@ -27,7 +27,7 @@ export class ReportService {
   }
 
   private fetch(): void {
-    this.http.get<ReportEntry[]>('/api/report').subscribe({
+    this.http.get<ReportEntry[]>('/api/v1/report').subscribe({
       next: (entries) => {
         this._entries.set(entries);
         this._status.set('ready');

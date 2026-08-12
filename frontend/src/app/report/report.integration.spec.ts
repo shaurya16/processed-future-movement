@@ -32,7 +32,7 @@ describe('Report + ReportService integration', () => {
     fixture.detectChanges();
     await fixture.whenStable();
 
-    httpMock.expectOne('/api/report').flush(
+    httpMock.expectOne('/api/v1/report').flush(
       { error: 'not ready' },
       { status: 503, statusText: 'Service Unavailable' },
     );
@@ -43,7 +43,7 @@ describe('Report + ReportService integration', () => {
     expect(fixture.nativeElement.querySelector('table')).toBeNull();
 
     await vi.advanceTimersByTimeAsync(3000);
-    httpMock.expectOne('/api/report').flush(sample);
+    httpMock.expectOne('/api/v1/report').flush(sample);
     fixture.detectChanges();
     await fixture.whenStable();
 
@@ -58,6 +58,6 @@ describe('Report + ReportService integration', () => {
       'a[data-testid="csv-download"]',
     );
     expect(csvLink).not.toBeNull();
-    expect(csvLink.getAttribute('href')).toBe('/api/report/csv');
+    expect(csvLink.getAttribute('href')).toBe('/api/v1/report/csv');
   });
 });
