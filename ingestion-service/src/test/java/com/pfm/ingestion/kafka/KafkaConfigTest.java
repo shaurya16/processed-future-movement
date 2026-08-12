@@ -10,7 +10,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-@SpringBootTest(properties = "spring.kafka.admin.auto-create=false")
+@SpringBootTest(properties = {"spring.kafka.admin.auto-create=false", "ingestion.topic=future-transactions"})
 class KafkaConfigTest {
 
     @Autowired

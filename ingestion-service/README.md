@@ -16,7 +16,7 @@ Run these from the **repo root**:
 ```bash
 docker compose up -d kafka                                    # starts a local Kafka broker on localhost:9092
 mvn -q -DskipTests install                                     # builds & installs `common` (and all modules) to the local repo
-INGESTION_FILE_PATH="$PWD/sample-data/Input.txt" mvn -pl ingestion-service spring-boot:run
+PFM_TOPIC=future-transactions INGESTION_FILE_PATH="$PWD/sample-data/Input.txt" mvn -pl ingestion-service spring-boot:run
 ```
 
 Note: don't pass `-am` to the `spring-boot:run` step. `-am` pulls the root aggregator POM
