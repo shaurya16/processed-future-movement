@@ -3140,3 +3140,664 @@ git commit -m "feat(frontend): add column definitions and persisted column visib
 ```
 
 ---
+
+## Task 14: Filtering and sorting
+
+**Files:**
+- Create: `frontend/src/app/report/report-filters.ts`
+- Test: `frontend/src/app/report/report-filters.spec.ts`
+
+**Interfaces:**
+- Consumes: `ReportEntry` (Task 12), `REPORT_COLUMNS` (Task 13), `ReportService`
+  (Task 12).
+- Produces:
+  - `FilterCriteria` interface and the pure function
+    `filterAndSort(entries, criteria): ReportEntry[]`.
+  - `ReportFilters` (injectable) with signals `client`, `account`, `product`,
+    `search`, `sortColumnId`, `sortDirection`; computed `clientOptions`,
+    `accountOptions`, `productOptions`, `rows`, `activeFilterCount`,
+    `totalCount`; methods `setClient`, `setAccount`, `setProduct`, `setSearch`,
+    `toggleSort(columnId)`, `clearAll()`.
+- Tasks 16, 17, 18 consume `rows()` and the option lists.
+
+The matching logic is a **pure function** so it can be tested without Angular
+wiring; the service only holds signals and feeds `reportService.entries()` in.
+Filters compose with AND. Options are derived from the response, so they hold 3
+values today and 300 later with no code change.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `frontend/src/app/report/report-filters.spec.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { FilterCriteria, filterAndSort } from './report-filters';
+import { ReportEntry } from './report-entry';
+
+function row(overrides: Partial<ReportEntry> = {}): ReportEntry {
+  return {
+    Client_Information: 'CL432100020001',
+    Product_Information: 'SGXFUNK20100910',
+    Total_Transaction_Amount: 46,
+    clientType: 'CL',
+    clientNumber: '4321',
+    accountNumber: '0002',
+    subaccountNumber: '0001',
+    exchangeCode: 'SGX',
+    productGroupCode: 'FU',
+    symbol: 'NK',
+    expirationDate: '2010-09-10',
+    grossLong: 46,
+    grossShort: 0,
+    tradeCount: 3,
+    firstTransactionDate: '2010-08-19',
+    lastTransactionDate: '2010-08-20',
+    lastUpdatedAt: '2026-08-12T14:31:52Z',
+    feesByCurrency: { USD: -0.9 },
+    ...overrides,
+  };
+}
+
+const NO_FILTERS: FilterCriteria = {
+  client: '',
+  account: '',
+  product: '',
+  search: '',
+  sortColumnId: null,
+  sortDirection: 'asc',
+};
+
+describe('filterAndSort', () => {
+  it('returns everything when no filter is set', () => {
+    const rows = [row(), row({ clientNumber: '1234' })];
+
+    expect(filterAndSort(rows, NO_FILTERS).length).toBe(2);
+  });
+
+  it('filters by client information', () => {
+    const rows = [row(), row({ Client_Information: 'CL123400030001' })];
+
+    const result = filterAndSort(rows, { ...NO_FILTERS, client: 'CL123400030001' });
+
+    expect(result.length).toBe(1);
+    expect(result[0].Client_Information).toBe('CL123400030001');
+  });
+
+  it('filters by account number', () => {
+    const rows = [row({ accountNumber: '0002' }), row({ accountNumber: '0003' })];
+
+    const result = filterAndSort(rows, { ...NO_FILTERS, account: '0003' });
+
+    expect(result.length).toBe(1);
+    expect(result[0].accountNumber).toBe('0003');
+  });
+
+  it('filters by product information', () => {
+    const rows = [row(), row({ Product_Information: 'CMEFUNK.20100910' })];
+
+    const result = filterAndSort(rows, { ...NO_FILTERS, product: 'CMEFUNK.20100910' });
+
+    expect(result.length).toBe(1);
+  });
+
+  it('composes filters with AND', () => {
+    const rows = [
+      row({ accountNumber: '0002', Product_Information: 'SGXFUNK20100910' }),
+      row({ accountNumber: '0003', Product_Information: 'SGXFUNK20100910' }),
+      row({ accountNumber: '0003', Product_Information: 'CMEFUNK.20100910' }),
+    ];
+
+    const result = filterAndSort(rows, {
+      ...NO_FILTERS,
+      account: '0003',
+      product: 'CMEFUNK.20100910',
+    });
+
+    expect(result.length).toBe(1);
+  });
+
+  it('searches case-insensitively across fields', () => {
+    const rows = [row({ symbol: 'NK' }), row({ symbol: 'N1' })];
+
+    expect(filterAndSort(rows, { ...NO_FILTERS, search: 'nk' }).length).toBe(1);
+  });
+
+  it('matches a numeric value via search', () => {
+    const rows = [row({ Total_Transaction_Amount: 46 }), row({ Total_Transaction_Amount: -215 })];
+
+    expect(filterAndSort(rows, { ...NO_FILTERS, search: '-215' }).length).toBe(1);
+  });
+
+  it('returns an empty array when filters exclude everything', () => {
+    expect(filterAndSort([row()], { ...NO_FILTERS, account: 'nope' })).toEqual([]);
+  });
+
+  it('sorts ascending by a string column', () => {
+    const rows = [row({ symbol: 'NK' }), row({ symbol: 'N1' })];
+
+    const result = filterAndSort(rows, { ...NO_FILTERS, sortColumnId: 'symbol' });
+
+    expect(result.map((r) => r.symbol)).toEqual(['N1', 'NK']);
+  });
+
+  it('sorts descending when direction is desc', () => {
+    const rows = [row({ symbol: 'N1' }), row({ symbol: 'NK' })];
+
+    const result = filterAndSort(rows, {
+      ...NO_FILTERS,
+      sortColumnId: 'symbol',
+      sortDirection: 'desc',
+    });
+
+    expect(result.map((r) => r.symbol)).toEqual(['NK', 'N1']);
+  });
+
+  it('sorts numerically, not lexicographically', () => {
+    const rows = [
+      row({ Total_Transaction_Amount: 46 }),
+      row({ Total_Transaction_Amount: -215 }),
+      row({ Total_Transaction_Amount: 285 }),
+    ];
+
+    const result = filterAndSort(rows, { ...NO_FILTERS, sortColumnId: 'netQuantity' });
+
+    // Lexicographic order would give -215, 285, 46.
+    expect(result.map((r) => r.Total_Transaction_Amount)).toEqual([-215, 46, 285]);
+  });
+
+  it('preserves the server order when no sort column is set', () => {
+    const rows = [row({ symbol: 'NK' }), row({ symbol: 'N1' })];
+
+    expect(filterAndSort(rows, NO_FILTERS).map((r) => r.symbol)).toEqual(['NK', 'N1']);
+  });
+
+  it('does not mutate the input array', () => {
+    const rows = [row({ symbol: 'NK' }), row({ symbol: 'N1' })];
+
+    filterAndSort(rows, { ...NO_FILTERS, sortColumnId: 'symbol' });
+
+    expect(rows.map((r) => r.symbol)).toEqual(['NK', 'N1']);
+  });
+
+  it('ignores an unknown sort column rather than throwing', () => {
+    expect(filterAndSort([row()], { ...NO_FILTERS, sortColumnId: 'nope' }).length).toBe(1);
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `cd frontend && npx vitest run src/app/report/report-filters.spec.ts`
+Expected: FAIL — cannot resolve `./report-filters`.
+
+- [ ] **Step 3: Implement**
+
+Create `frontend/src/app/report/report-filters.ts`:
+
+```ts
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { ReportEntry } from './report-entry';
+import { REPORT_COLUMNS } from './report-columns';
+import { ReportService } from './report.service';
+
+export type SortDirection = 'asc' | 'desc';
+
+export interface FilterCriteria {
+  /** '' means "all" for each dimension. */
+  client: string;
+  account: string;
+  product: string;
+  search: string;
+  sortColumnId: string | null;
+  sortDirection: SortDirection;
+}
+
+/**
+ * Pure so it can be tested without Angular. Filters compose with AND; an empty
+ * dimension value means "all". A null sortColumnId preserves the server's order,
+ * which is already sorted by client then product.
+ */
+export function filterAndSort(
+  entries: readonly ReportEntry[],
+  criteria: FilterCriteria,
+): ReportEntry[] {
+  const search = criteria.search.trim().toLowerCase();
+
+  const filtered = entries.filter((entry) => {
+    if (criteria.client && entry.Client_Information !== criteria.client) return false;
+    if (criteria.account && entry.accountNumber !== criteria.account) return false;
+    if (criteria.product && entry.Product_Information !== criteria.product) return false;
+    if (!search) return true;
+    return REPORT_COLUMNS.some((column) =>
+      String(column.sortValue(entry)).toLowerCase().includes(search),
+    );
+  });
+
+  const column = REPORT_COLUMNS.find((candidate) => candidate.id === criteria.sortColumnId);
+  if (!column) {
+    return filtered;
+  }
+
+  const direction = criteria.sortDirection === 'desc' ? -1 : 1;
+  // Copy first: sort() mutates, and the input is the service's signal value.
+  return [...filtered].sort((left, right) => {
+    const a = column.sortValue(left);
+    const b = column.sortValue(right);
+    if (typeof a === 'number' && typeof b === 'number') {
+      return (a - b) * direction;
+    }
+    return String(a).localeCompare(String(b)) * direction;
+  });
+}
+
+@Injectable({ providedIn: 'root' })
+export class ReportFilters {
+  private readonly reportService = inject(ReportService);
+
+  readonly client = signal('');
+  readonly account = signal('');
+  readonly product = signal('');
+  readonly search = signal('');
+  readonly sortColumnId = signal<string | null>(null);
+  readonly sortDirection = signal<SortDirection>('asc');
+
+  /** Options come from the data, so cardinality is whatever the response contains. */
+  readonly clientOptions = computed(() => distinct(this.reportService.entries(), (e) => e.Client_Information));
+  readonly accountOptions = computed(() => distinct(this.reportService.entries(), (e) => e.accountNumber));
+  readonly productOptions = computed(() => distinct(this.reportService.entries(), (e) => e.Product_Information));
+
+  readonly rows = computed(() =>
+    filterAndSort(this.reportService.entries(), {
+      client: this.client(),
+      account: this.account(),
+      product: this.product(),
+      search: this.search(),
+      sortColumnId: this.sortColumnId(),
+      sortDirection: this.sortDirection(),
+    }),
+  );
+
+  readonly totalCount = computed(() => this.reportService.entries().length);
+
+  readonly activeFilterCount = computed(
+    () =>
+      [this.client(), this.account(), this.product(), this.search().trim()].filter(
+        (value) => value !== '',
+      ).length,
+  );
+
+  setClient(value: string): void {
+    this.client.set(value);
+  }
+
+  setAccount(value: string): void {
+    this.account.set(value);
+  }
+
+  setProduct(value: string): void {
+    this.product.set(value);
+  }
+
+  setSearch(value: string): void {
+    this.search.set(value);
+  }
+
+  /** First click sorts ascending; clicking the active column flips direction. */
+  toggleSort(columnId: string): void {
+    if (this.sortColumnId() === columnId) {
+      this.sortDirection.update((direction) => (direction === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    this.sortColumnId.set(columnId);
+    this.sortDirection.set('asc');
+  }
+
+  clearAll(): void {
+    this.client.set('');
+    this.account.set('');
+    this.product.set('');
+    this.search.set('');
+  }
+}
+
+function distinct(entries: readonly ReportEntry[], select: (entry: ReportEntry) => string): string[] {
+  return [...new Set(entries.map(select))].sort((a, b) => a.localeCompare(b));
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `cd frontend && npx vitest run src/app/report/report-filters.spec.ts`
+Expected: PASS — 14 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add frontend/src/app/report/report-filters.ts \
+        frontend/src/app/report/report-filters.spec.ts
+git commit -m "feat(frontend): add client-side filtering and sorting for the report"
+```
+
+---
+
+## Task 15: Source-file panel
+
+**Files:**
+- Create: `frontend/src/app/report/ingestion-status.service.ts`
+- Create: `frontend/src/app/report/source-file-panel.ts`
+- Create: `frontend/src/app/report/format.ts`
+- Test: `frontend/src/app/report/ingestion-status.service.spec.ts`
+- Test: `frontend/src/app/report/format.spec.ts`
+
+**Interfaces:**
+- Consumes: `IngestionStatus` (Task 12); `GET /api/v1/ingest/status` (Tasks 9–10).
+- Produces:
+  - `IngestionStatusService` with `status: Signal<IngestionStatus | null>`,
+    `available: Signal<boolean>`, `load()`.
+  - `formatBytes(n)`, `formatDateTime(iso)`, `formatRelative(iso, now)` in
+    `format.ts` — reused by Tasks 16 and 17.
+  - `SourceFilePanel` standalone component, selector `app-source-file-panel`.
+
+The status endpoint failing must **not** affect the report — the panel degrades to
+"unavailable" on its own.
+
+- [ ] **Step 1: Write the failing format test**
+
+Create `frontend/src/app/report/format.spec.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { formatBytes, formatDateTime, formatRelative } from './format';
+
+describe('formatBytes', () => {
+  it('formats bytes, KB and MB', () => {
+    expect(formatBytes(512)).toBe('512 B');
+    expect(formatBytes(127624)).toBe('124.6 KB');
+    expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB');
+  });
+
+  it('renders an em dash for null', () => {
+    expect(formatBytes(null)).toBe('—');
+  });
+
+  it('handles zero without dividing', () => {
+    expect(formatBytes(0)).toBe('0 B');
+  });
+});
+
+describe('formatDateTime', () => {
+  it('renders an em dash for null', () => {
+    expect(formatDateTime(null)).toBe('—');
+  });
+
+  it('includes the date and time', () => {
+    const formatted = formatDateTime('2026-08-12T14:31:52Z');
+    expect(formatted).toContain('2026');
+  });
+});
+
+describe('formatRelative', () => {
+  const now = new Date('2026-08-12T14:35:00Z');
+
+  it('reports seconds under a minute', () => {
+    expect(formatRelative('2026-08-12T14:34:30Z', now)).toBe('30s ago');
+  });
+
+  it('reports whole minutes', () => {
+    expect(formatRelative('2026-08-12T14:32:00Z', now)).toBe('3m ago');
+  });
+
+  it('reports hours', () => {
+    expect(formatRelative('2026-08-12T11:35:00Z', now)).toBe('3h ago');
+  });
+
+  it('says just now for the current instant', () => {
+    expect(formatRelative('2026-08-12T14:35:00Z', now)).toBe('just now');
+  });
+
+  it('renders an em dash for null', () => {
+    expect(formatRelative(null, now)).toBe('—');
+  });
+});
+```
+
+- [ ] **Step 2: Implement the formatters**
+
+Create `frontend/src/app/report/format.ts`:
+
+```ts
+const EM_DASH = '—';
+
+export function formatBytes(bytes: number | null): string {
+  if (bytes === null) return EM_DASH;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function formatDateTime(iso: string | null): string {
+  if (!iso) return EM_DASH;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return EM_DASH;
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/** @param now injected so tests are deterministic. */
+export function formatRelative(iso: string | null, now: Date = new Date()): string {
+  if (!iso) return EM_DASH;
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return EM_DASH;
+
+  const seconds = Math.floor((now.getTime() - then.getTime()) / 1000);
+  if (seconds <= 0) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+```
+
+- [ ] **Step 3: Write the failing status-service test**
+
+Create `frontend/src/app/report/ingestion-status.service.spec.ts`:
+
+```ts
+import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { IngestionStatusService } from './ingestion-status.service';
+import { IngestionStatus } from './report-entry';
+
+const SAMPLE: IngestionStatus = {
+  configuredPath: 'sample-data/Input.txt',
+  fileExists: true,
+  fileSizeBytes: 127624,
+  fileLastModified: '2026-08-12T09:14:00Z',
+  lastIngestAt: '2026-08-12T14:31:52Z',
+  fingerprint: 'fp-1',
+  totalLines: 717,
+  published: 717,
+  skipped: 0,
+  errorCount: 0,
+};
+
+describe('IngestionStatusService', () => {
+  let service: IngestionStatusService;
+  let httpMock: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    });
+    service = TestBed.inject(IngestionStatusService);
+    httpMock = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => httpMock.verify());
+
+  it('starts with no status', () => {
+    expect(service.status()).toBeNull();
+    expect(service.available()).toBe(false);
+  });
+
+  it('loads the status', () => {
+    service.load();
+    httpMock.expectOne('/api/v1/ingest/status').flush(SAMPLE);
+
+    expect(service.status()).toEqual(SAMPLE);
+    expect(service.available()).toBe(true);
+  });
+
+  it('degrades to unavailable on failure without throwing', () => {
+    // The report must not be affected by the status endpoint being down.
+    service.load();
+    httpMock.expectOne('/api/v1/ingest/status').flush(
+      { error: 'nope' },
+      { status: 500, statusText: 'Server Error' },
+    );
+
+    expect(service.status()).toBeNull();
+    expect(service.available()).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 4: Run both tests to verify they fail**
+
+Run: `cd frontend && npx vitest run src/app/report/format.spec.ts src/app/report/ingestion-status.service.spec.ts`
+Expected: FAIL — cannot resolve `./ingestion-status.service`.
+
+- [ ] **Step 5: Implement the status service**
+
+Create `frontend/src/app/report/ingestion-status.service.ts`:
+
+```ts
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { IngestionStatus } from './report-entry';
+
+@Injectable({ providedIn: 'root' })
+export class IngestionStatusService {
+  private readonly http = inject(HttpClient);
+  private readonly _status = signal<IngestionStatus | null>(null);
+
+  readonly status = this._status.asReadonly();
+  readonly available = computed(() => this._status() !== null);
+
+  load(): void {
+    this.http.get<IngestionStatus>('/api/v1/ingest/status').subscribe({
+      next: (status) => this._status.set(status),
+      // Provenance is supplementary; losing it must never break the report view.
+      error: () => this._status.set(null),
+    });
+  }
+}
+```
+
+- [ ] **Step 6: Implement the panel**
+
+Create `frontend/src/app/report/source-file-panel.ts`:
+
+```ts
+import { Component, inject } from '@angular/core';
+import { IngestionStatusService } from './ingestion-status.service';
+import { formatBytes, formatDateTime, formatRelative } from './format';
+
+@Component({
+  selector: 'app-source-file-panel',
+  template: `
+    <section
+      class="rounded-lg border border-rule bg-surface-1 p-4"
+      aria-labelledby="source-file-heading"
+    >
+      <h2 id="source-file-heading" class="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+        Source file
+      </h2>
+
+      @if (statusService.status(); as status) {
+        <p class="mt-2 font-mono text-sm text-ink-primary" data-testid="configured-path">
+          {{ status.configuredPath }}
+        </p>
+
+        @if (status.fileExists) {
+          <p class="mt-1 text-sm text-ink-secondary">
+            {{ bytes(status.fileSizeBytes) }} · modified {{ dateTime(status.fileLastModified) }}
+          </p>
+        } @else {
+          <p class="mt-1 text-sm text-status-critical" data-testid="file-missing">
+            ⚠ File not found at this path
+          </p>
+        }
+
+        @if (status.lastIngestAt) {
+          <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
+            <div>
+              <dt class="text-ink-muted">Ingested</dt>
+              <dd class="text-ink-primary" data-testid="ingested-at">
+                {{ dateTime(status.lastIngestAt) }} ({{ relative(status.lastIngestAt) }})
+              </dd>
+            </div>
+            <div>
+              <dt class="text-ink-muted">Published</dt>
+              <dd class="tabular text-ink-primary">{{ status.published }}</dd>
+            </div>
+            <div>
+              <dt class="text-ink-muted">Skipped</dt>
+              <dd class="tabular text-ink-primary">{{ status.skipped }}</dd>
+            </div>
+            <div>
+              <dt class="text-ink-muted">Failed</dt>
+              <dd
+                class="tabular"
+                [class.text-status-critical]="(status.errorCount ?? 0) > 0"
+                [class.text-ink-primary]="(status.errorCount ?? 0) === 0"
+              >
+                {{ status.errorCount }}
+              </dd>
+            </div>
+          </dl>
+        } @else {
+          <p class="mt-3 text-sm text-ink-secondary" data-testid="not-ingested">
+            Not yet ingested.
+          </p>
+        }
+      } @else {
+        <p class="mt-2 text-sm text-ink-secondary" data-testid="status-unavailable">
+          File details unavailable.
+        </p>
+      }
+    </section>
+  `,
+})
+export class SourceFilePanel {
+  protected readonly statusService = inject(IngestionStatusService);
+
+  protected bytes = formatBytes;
+  protected dateTime = formatDateTime;
+  protected relative = (iso: string | null) => formatRelative(iso);
+}
+```
+
+- [ ] **Step 7: Run the tests to verify they pass**
+
+Run: `cd frontend && npx vitest run src/app/report/format.spec.ts src/app/report/ingestion-status.service.spec.ts`
+Expected: PASS — 12 tests.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add frontend/src/app/report/format.ts frontend/src/app/report/format.spec.ts \
+        frontend/src/app/report/ingestion-status.service.ts \
+        frontend/src/app/report/ingestion-status.service.spec.ts \
+        frontend/src/app/report/source-file-panel.ts
+git commit -m "feat(frontend): add the source-file provenance panel"
+```
+
+---
