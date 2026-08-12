@@ -81,3 +81,12 @@ Angular unit/integration specs) are updated to assert the `/v1` paths and contin
 to serve as the verification — no new tests are needed since this is a pure
 path-rename with unchanged behavior. `mvn clean verify` (backend) and the frontend
 test/build commands must pass before this is considered done.
+
+**Manual verification must go through nginx, not just direct-to-backend curl.**
+The nginx `location /api/` block needs no code change (bare-variable `proxy_pass`
+passes the full original URI through unmodified), which makes it the easiest piece
+to under-test: a mistake there only manifests when a request is routed through
+nginx, while `curl localhost:8082/api/v1/report` straight to the backend would keep
+succeeding and mask it. As part of manual sign-off, hit the report endpoint through
+the docker-compose frontend (`curl http://localhost:8080/api/v1/report`, or the
+browser UI) in addition to the direct-to-service curl commands in the READMEs.
