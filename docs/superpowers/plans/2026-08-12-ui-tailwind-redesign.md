@@ -3801,3 +3801,532 @@ git commit -m "feat(frontend): add the source-file provenance panel"
 ```
 
 ---
+
+## Task 16: The table — diverging bar and trade-date-relative expiry
+
+**Files:**
+- Create: `frontend/src/app/report/cell-view.ts`
+- Create: `frontend/src/app/report/report-table.ts`
+- Create: `frontend/src/app/report/report-table.html`
+- Test: `frontend/src/app/report/cell-view.spec.ts`
+- Test: `frontend/src/app/report/report-table.spec.ts`
+
+**Interfaces:**
+- Consumes: `ColumnDef`, `ColumnPreferences` (Task 13); `ReportFilters` (Task 14);
+  `formatDateTime` (Task 15).
+- Produces:
+  - `expiryBadge(expirationDate, lastTransactionDate): ExpiryBadge` and
+    `barGeometry(value, maxAbs): BarGeometry` in `cell-view.ts`.
+  - `ReportTable` standalone component, selector `app-report-table`.
+
+**Two things this task must get right:**
+
+1. **Expiry is measured against the row's last trade date, not wall clock.** The
+   sample data expires `2010-09-10`; against today every row would be a red
+   "expired" badge conveying nothing. Against the trade date (`2010-08-20`) it is
+   21 days — informative. Labels say **"as of trade date"** so historical data
+   cannot be misread as live contract status.
+2. **Colour is never the only channel.** The signed number is always rendered as
+   text beside the bar, and badges carry an icon plus a label.
+
+- [ ] **Step 1: Write the failing cell-view test**
+
+Create `frontend/src/app/report/cell-view.spec.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { barGeometry, expiryBadge } from './cell-view';
+
+describe('expiryBadge', () => {
+  it('flags an expiry before the last trade date as expired, worded relative to trade date', () => {
+    const badge = expiryBadge('2010-08-15', '2010-08-20');
+
+    expect(badge.status).toBe('expired');
+    // Must not read as live status — the data is historical.
+    expect(badge.label).toBe('expired as of trade date');
+  });
+
+  it('flags an expiry within seven days of the last trade date as near', () => {
+    const badge = expiryBadge('2010-08-25', '2010-08-20');
+
+    expect(badge.status).toBe('near');
+    expect(badge.label).toBe('5 days from trade date');
+  });
+
+  it('uses the singular for one day', () => {
+    expect(expiryBadge('2010-08-21', '2010-08-20').label).toBe('1 day from trade date');
+  });
+
+  it('treats same-day expiry as near', () => {
+    const badge = expiryBadge('2010-08-20', '2010-08-20');
+
+    expect(badge.status).toBe('near');
+    expect(badge.label).toBe('expires on trade date');
+  });
+
+  it('does not badge an expiry comfortably beyond the trade date', () => {
+    // The real sample case: 2010-08-20 trade, 2010-09-10 expiry = 21 days.
+    const badge = expiryBadge('2010-09-10', '2010-08-20');
+
+    expect(badge.status).toBe('normal');
+    expect(badge.days).toBe(21);
+  });
+
+  it('cannot measure without a trade date, so does not badge', () => {
+    const badge = expiryBadge('2010-09-10', null);
+
+    expect(badge.status).toBe('normal');
+    expect(badge.days).toBeNull();
+  });
+});
+
+describe('barGeometry', () => {
+  it('extends right for a positive net', () => {
+    expect(barGeometry(100, 200)).toEqual({ side: 'long', percent: 50 });
+  });
+
+  it('extends left for a negative net', () => {
+    expect(barGeometry(-200, 200)).toEqual({ side: 'short', percent: 100 });
+  });
+
+  it('is flat at zero', () => {
+    expect(barGeometry(0, 200)).toEqual({ side: 'flat', percent: 0 });
+  });
+
+  it('does not divide by zero when every row is flat', () => {
+    expect(barGeometry(0, 0)).toEqual({ side: 'flat', percent: 0 });
+  });
+
+  it('scales to the largest absolute value in view', () => {
+    expect(barGeometry(50, 100).percent).toBe(50);
+    expect(barGeometry(50, 500).percent).toBe(10);
+  });
+});
+```
+
+- [ ] **Step 2: Implement `cell-view.ts`**
+
+Create `frontend/src/app/report/cell-view.ts`:
+
+```ts
+export type ExpiryStatus = 'expired' | 'near' | 'normal';
+
+export interface ExpiryBadge {
+  status: ExpiryStatus;
+  label: string;
+  /** Days from the last trade date to expiry; null when it cannot be measured. */
+  days: number | null;
+}
+
+const NEAR_EXPIRY_DAYS = 7;
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * Days-to-expiry measured against the row's LAST TRADE DATE, deliberately not
+ * against today. The sample data expires in 2010, so a wall-clock comparison
+ * would badge every row "expired" — true but информационally empty. Relative to
+ * the trade date the number describes the data, which is what the reader wants.
+ *
+ * Labels name the reference point ("as of trade date") so a historical report is
+ * never mistaken for live contract status.
+ */
+export function expiryBadge(
+  expirationDate: string,
+  lastTransactionDate: string | null,
+): ExpiryBadge {
+  if (!lastTransactionDate) {
+    return { status: 'normal', label: '', days: null };
+  }
+
+  const expiry = Date.parse(expirationDate);
+  const traded = Date.parse(lastTransactionDate);
+  if (Number.isNaN(expiry) || Number.isNaN(traded)) {
+    return { status: 'normal', label: '', days: null };
+  }
+
+  const days = Math.round((expiry - traded) / MS_PER_DAY);
+
+  if (days < 0) {
+    return { status: 'expired', label: 'expired as of trade date', days };
+  }
+  if (days === 0) {
+    return { status: 'near', label: 'expires on trade date', days };
+  }
+  if (days <= NEAR_EXPIRY_DAYS) {
+    return { status: 'near', label: `${days} day${days === 1 ? '' : 's'} from trade date`, days };
+  }
+  return { status: 'normal', label: '', days };
+}
+
+export interface BarGeometry {
+  side: 'long' | 'short' | 'flat';
+  /** 0–100, relative to the largest absolute value currently in view. */
+  percent: number;
+}
+
+export function barGeometry(value: number, maxAbsolute: number): BarGeometry {
+  if (value === 0 || maxAbsolute === 0) {
+    return { side: 'flat', percent: 0 };
+  }
+  return {
+    side: value > 0 ? 'long' : 'short',
+    percent: Math.round((Math.abs(value) / maxAbsolute) * 100),
+  };
+}
+```
+
+Note: remove the stray non-ASCII word if your editor introduced one — the comment
+should read "informationally empty".
+
+- [ ] **Step 3: Run the cell-view test**
+
+Run: `cd frontend && npx vitest run src/app/report/cell-view.spec.ts`
+Expected: PASS — 11 tests.
+
+- [ ] **Step 4: Write the failing table test**
+
+Create `frontend/src/app/report/report-table.spec.ts`:
+
+```ts
+import { signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ReportTable } from './report-table';
+import { ReportFilters } from './report-filters';
+import { ColumnPreferences } from './column-preferences';
+import { REPORT_COLUMNS } from './report-columns';
+import { ReportEntry } from './report-entry';
+
+function row(overrides: Partial<ReportEntry> = {}): ReportEntry {
+  return {
+    Client_Information: 'CL432100020001',
+    Product_Information: 'SGXFUNK20100910',
+    Total_Transaction_Amount: 46,
+    clientType: 'CL',
+    clientNumber: '4321',
+    accountNumber: '0002',
+    subaccountNumber: '0001',
+    exchangeCode: 'SGX',
+    productGroupCode: 'FU',
+    symbol: 'NK',
+    expirationDate: '2010-09-10',
+    grossLong: 46,
+    grossShort: 0,
+    tradeCount: 3,
+    firstTransactionDate: '2010-08-19',
+    lastTransactionDate: '2010-08-20',
+    lastUpdatedAt: '2026-08-12T14:31:52Z',
+    feesByCurrency: { USD: -0.9 },
+    ...overrides,
+  };
+}
+
+function setup(rows: ReportEntry[], visibleIds = ['clientNumber', 'accountNumber', 'netQuantity']) {
+  const filters = {
+    rows: signal(rows),
+    totalCount: signal(rows.length),
+    activeFilterCount: signal(0),
+    sortColumnId: signal<string | null>(null),
+    sortDirection: signal<'asc' | 'desc'>('asc'),
+    toggleSort: vi.fn(),
+  };
+  const prefs = {
+    visibleColumns: signal(REPORT_COLUMNS.filter((c) => visibleIds.includes(c.id))),
+  };
+  TestBed.configureTestingModule({
+    imports: [ReportTable],
+    providers: [
+      { provide: ReportFilters, useValue: filters },
+      { provide: ColumnPreferences, useValue: prefs },
+    ],
+  });
+  return { filters, prefs };
+}
+
+describe('ReportTable', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+
+  it('renders one header cell per visible column, in declaration order', async () => {
+    setup([row()]);
+    const fixture = TestBed.createComponent(ReportTable);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const headers = [...fixture.nativeElement.querySelectorAll('thead th')].map((th: HTMLElement) =>
+      th.textContent?.trim(),
+    );
+    expect(headers.length).toBe(3);
+    expect(headers[0]).toContain('Client');
+    expect(headers[1]).toContain('Account');
+    expect(headers[2]).toContain('Net');
+  });
+
+  it('renders exactly as many body cells per row as there are headers', async () => {
+    // The invariant a column-definition-driven table exists to guarantee.
+    setup([row(), row({ clientNumber: '1234' })], [
+      'clientNumber',
+      'accountNumber',
+      'symbol',
+      'netQuantity',
+      'tradeCount',
+    ]);
+    const fixture = TestBed.createComponent(ReportTable);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const headerCount = fixture.nativeElement.querySelectorAll('thead th').length;
+    const bodyRows = fixture.nativeElement.querySelectorAll('tbody tr');
+    expect(bodyRows.length).toBe(2);
+    for (const bodyRow of bodyRows) {
+      expect(bodyRow.querySelectorAll('td').length).toBe(headerCount);
+    }
+  });
+
+  it('shows the signed net value as text, never colour alone', async () => {
+    setup([row({ Total_Transaction_Amount: -215 })]);
+    const fixture = TestBed.createComponent(ReportTable);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('tbody').textContent).toContain('-215');
+  });
+
+  it('labels a flat row', async () => {
+    setup([row({ Total_Transaction_Amount: 0 })]);
+    const fixture = TestBed.createComponent(ReportTable);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('flat');
+  });
+
+  it('wires a header click to toggleSort', async () => {
+    const { filters } = setup([row()]);
+    const fixture = TestBed.createComponent(ReportTable);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    fixture.nativeElement.querySelector('thead th button').click();
+
+    expect(filters.toggleSort).toHaveBeenCalledWith('clientNumber');
+  });
+
+  it('shows a filtered-empty message distinct from a genuinely empty report', async () => {
+    const { filters } = setup([]);
+    filters.totalCount.set(5);
+    filters.activeFilterCount.set(1);
+    const fixture = TestBed.createComponent(ReportTable);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('No rows match');
+  });
+
+  it('shows the expiry badge relative to trade date', async () => {
+    setup([row({ expirationDate: '2010-08-22', lastTransactionDate: '2010-08-20' })], [
+      'expirationDate',
+    ]);
+    const fixture = TestBed.createComponent(ReportTable);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('2 days from trade date');
+  });
+});
+```
+
+- [ ] **Step 5: Run the test to verify it fails**
+
+Run: `cd frontend && npx vitest run src/app/report/report-table.spec.ts`
+Expected: FAIL — cannot resolve `./report-table`.
+
+- [ ] **Step 6: Implement the component**
+
+Create `frontend/src/app/report/report-table.ts`:
+
+```ts
+import { Component, computed, inject } from '@angular/core';
+import { ColumnPreferences } from './column-preferences';
+import { ReportFilters } from './report-filters';
+import { ColumnDef } from './report-columns';
+import { ReportEntry } from './report-entry';
+import { BarGeometry, ExpiryBadge, barGeometry, expiryBadge } from './cell-view';
+import { formatDateTime } from './format';
+
+@Component({
+  selector: 'app-report-table',
+  templateUrl: './report-table.html',
+})
+export class ReportTable {
+  protected readonly filters = inject(ReportFilters);
+  protected readonly columnPreferences = inject(ColumnPreferences);
+
+  /** The bar scales to the largest absolute net currently in view, not overall. */
+  protected readonly maxAbsoluteNet = computed(() =>
+    this.filters.rows().reduce((max, row) => Math.max(max, Math.abs(row.Total_Transaction_Amount)), 0),
+  );
+
+  protected cellText(column: ColumnDef, entry: ReportEntry): string {
+    const value = column.sortValue(entry);
+    if (column.render === 'date') {
+      return formatDateTime(typeof value === 'string' && value !== '' ? value : null);
+    }
+    return String(value);
+  }
+
+  protected bar(entry: ReportEntry): BarGeometry {
+    return barGeometry(entry.Total_Transaction_Amount, this.maxAbsoluteNet());
+  }
+
+  protected expiry(entry: ReportEntry): ExpiryBadge {
+    return expiryBadge(entry.expirationDate, entry.lastTransactionDate);
+  }
+
+  protected sortIndicator(column: ColumnDef): string {
+    if (this.filters.sortColumnId() !== column.id) return '';
+    return this.filters.sortDirection() === 'asc' ? '▲' : '▼';
+  }
+
+  protected rowKey(entry: ReportEntry): string {
+    return entry.Client_Information + '|' + entry.Product_Information;
+  }
+}
+```
+
+Create `frontend/src/app/report/report-table.html`:
+
+```html
+<!--
+  Wide column selections scroll inside this container so the page body never
+  scrolls horizontally.
+-->
+<div class="overflow-x-auto rounded-lg border border-rule bg-surface-1">
+  <table class="w-full border-collapse text-sm">
+    <thead class="sticky top-0 bg-surface-1">
+      <tr class="border-b border-rule">
+        @for (column of columnPreferences.visibleColumns(); track column.id) {
+          <th
+            scope="col"
+            class="px-3 py-2 font-semibold text-ink-secondary"
+            [class.text-right]="column.align === 'right'"
+            [class.text-left]="column.align === 'left'"
+            [attr.aria-sort]="
+              filters.sortColumnId() === column.id
+                ? (filters.sortDirection() === 'asc' ? 'ascending' : 'descending')
+                : 'none'
+            "
+          >
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 hover:text-ink-primary"
+              (click)="filters.toggleSort(column.id)"
+            >
+              {{ column.label }}
+              <span aria-hidden="true" class="text-ink-muted">{{ sortIndicator(column) }}</span>
+            </button>
+          </th>
+        }
+      </tr>
+    </thead>
+
+    <tbody>
+      @for (entry of filters.rows(); track rowKey(entry)) {
+        <tr class="border-b border-rule last:border-0 hover:bg-surface-page">
+          @for (column of columnPreferences.visibleColumns(); track column.id) {
+            <td
+              class="px-3 py-2 align-middle"
+              [class.text-right]="column.align === 'right'"
+              [class.tabular]="column.numeric"
+            >
+              @switch (column.render) {
+                @case ('divergingBar') {
+                  <!--
+                    Diverging bar off a centre baseline. The signed number is always
+                    present as text, so colour is never the only channel.
+                  -->
+                  <div class="flex items-center justify-end gap-2">
+                    <span class="tabular text-ink-primary">
+                      {{ entry.Total_Transaction_Amount }}
+                    </span>
+                    @if (bar(entry).side === 'flat') {
+                      <span class="text-xs text-ink-muted">flat</span>
+                    }
+                    <span class="relative hidden h-2 w-24 shrink-0 sm:block" aria-hidden="true">
+                      <span
+                        class="absolute inset-y-0 left-1/2 w-px bg-rule"
+                      ></span>
+                      @if (bar(entry).side === 'long') {
+                        <span
+                          class="absolute inset-y-0 left-1/2 rounded-r bg-net-long"
+                          [style.width.%]="bar(entry).percent / 2"
+                        ></span>
+                      }
+                      @if (bar(entry).side === 'short') {
+                        <span
+                          class="absolute inset-y-0 right-1/2 rounded-l bg-net-short"
+                          [style.width.%]="bar(entry).percent / 2"
+                        ></span>
+                      }
+                    </span>
+                  </div>
+                }
+                @case ('expiry') {
+                  <div class="flex items-center gap-2">
+                    <span>{{ entry.expirationDate }}</span>
+                    @if (expiry(entry).status === 'expired') {
+                      <span
+                        class="rounded bg-status-critical/15 px-1.5 py-0.5 text-xs text-status-critical"
+                      >
+                        ⚠ {{ expiry(entry).label }}
+                      </span>
+                    }
+                    @if (expiry(entry).status === 'near') {
+                      <span
+                        class="rounded bg-status-warning/20 px-1.5 py-0.5 text-xs text-ink-primary"
+                      >
+                        ◷ {{ expiry(entry).label }}
+                      </span>
+                    }
+                  </div>
+                }
+                @default {
+                  {{ cellText(column, entry) }}
+                }
+              }
+            </td>
+          }
+        </tr>
+      } @empty {
+        <tr>
+          <td
+            [attr.colspan]="columnPreferences.visibleColumns().length"
+            class="px-3 py-8 text-center text-ink-secondary"
+          >
+            @if (filters.activeFilterCount() > 0) {
+              No rows match the current filters ({{ filters.totalCount() }} total).
+            } @else {
+              No transactions recorded yet.
+            }
+          </td>
+        </tr>
+      }
+    </tbody>
+  </table>
+</div>
+```
+
+- [ ] **Step 7: Run the test to verify it passes**
+
+Run: `cd frontend && npx vitest run src/app/report/report-table.spec.ts`
+Expected: PASS — 7 tests.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add frontend/src/app/report/cell-view.ts frontend/src/app/report/cell-view.spec.ts \
+        frontend/src/app/report/report-table.ts frontend/src/app/report/report-table.html \
+        frontend/src/app/report/report-table.spec.ts
+git commit -m "feat(frontend): add the report table with diverging net bar and expiry badges"
+```
+
+---
