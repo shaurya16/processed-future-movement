@@ -74,7 +74,7 @@ class IngestionServiceTest {
         assertFalse(result.cached());
         verify(kafkaTemplate, times(2)).send(argThat((ProducerRecord<String, FutureTransaction> record) ->
                 "future-transactions".equals(record.topic())
-                        && "CL432100020001|SGXFUNK20100910".equals(record.key())));
+                        && "CL|4321|0002|0001|SGX|FU|NK|20100910".equals(record.key())));
     }
 
     @Test

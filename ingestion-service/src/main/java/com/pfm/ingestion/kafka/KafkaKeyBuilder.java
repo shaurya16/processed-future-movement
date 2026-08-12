@@ -1,19 +1,18 @@
 package com.pfm.ingestion.kafka;
 
 import com.pfm.common.domain.FutureTransaction;
+import com.pfm.common.domain.ReportKey;
 
-import java.time.format.DateTimeFormatter;
-
+/**
+ * Builds the Kafka message key. The format itself lives in {@link ReportKey} so
+ * that this writer and processing-service's reader cannot drift apart.
+ */
 public final class KafkaKeyBuilder {
 
     private KafkaKeyBuilder() {
     }
 
     public static String buildKey(FutureTransaction transaction) {
-        String clientInformation = transaction.clientType() + transaction.clientNumber()
-                + transaction.accountNumber() + transaction.subaccountNumber();
-        String productInformation = transaction.exchangeCode() + transaction.productGroupCode()
-                + transaction.symbol() + DateTimeFormatter.BASIC_ISO_DATE.format(transaction.expirationDate());
-        return clientInformation + "|" + productInformation;
+        return ReportKey.from(transaction).encode();
     }
 }
