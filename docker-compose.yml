@@ -1,3 +1,5 @@
+x-topic: &pfm-topic future-transactions
+
 services:
   kafka:
     image: apache/kafka:3.9.2
@@ -37,6 +39,7 @@ services:
       - '8081:8081'
     environment:
       KAFKA_BOOTSTRAP_SERVERS: 'broker:19092'
+      PFM_TOPIC: *pfm-topic
     depends_on:
       kafka:
         condition: service_healthy
@@ -44,6 +47,8 @@ services:
   wait-for-topic:
     image: apache/kafka:3.9.2
     container_name: pfm-wait-for-topic
+    environment:
+      PFM_TOPIC: *pfm-topic
     depends_on:
       kafka:
         condition: service_healthy
@@ -51,11 +56,11 @@ services:
       - sh
       - -c
       - |
-        until /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:19092 --list | grep -qx future-transactions; do
-          echo "waiting for future-transactions topic..."
+        until /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:19092 --list | grep -qx "$$PFM_TOPIC"; do
+          echo "waiting for $$PFM_TOPIC topic..."
           sleep 2
         done
-        echo "future-transactions topic found, starting processing-service"
+        echo "$$PFM_TOPIC topic found, starting processing-service"
 
   processing-service:
     build:
@@ -67,6 +72,7 @@ services:
       - '8082:8082'
     environment:
       KAFKA_BOOTSTRAP_SERVERS: 'broker:19092'
+      PFM_TOPIC: *pfm-topic
     depends_on:
       wait-for-topic:
         condition: service_completed_successfully
