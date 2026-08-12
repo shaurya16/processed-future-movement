@@ -1,0 +1,35 @@
+const EM_DASH = '—';
+
+export function formatBytes(bytes: number | null): string {
+  if (bytes === null) return EM_DASH;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function formatDateTime(iso: string | null): string {
+  if (!iso) return EM_DASH;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return EM_DASH;
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/** @param now injected so tests are deterministic. */
+export function formatRelative(iso: string | null, now: Date = new Date()): string {
+  if (!iso) return EM_DASH;
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return EM_DASH;
+
+  const seconds = Math.floor((now.getTime() - then.getTime()) / 1000);
+  if (seconds <= 0) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
