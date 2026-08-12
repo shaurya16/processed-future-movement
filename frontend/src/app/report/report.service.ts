@@ -1,4 +1,4 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { timer } from 'rxjs';
 import { ReportEntry } from './report-entry';
@@ -33,7 +33,18 @@ export class ReportService {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
-    document.addEventListener('visibilitychange', () => this.syncPolling(true));
+    const onVisibilityChange = () => this.syncPolling(true);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    // Without this, every TestBed-created instance leaves a listener on the shared
+    // jsdom document and a possibly-live interval behind.
+    inject(DestroyRef).onDestroy(() => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (this.pollTimer !== null) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
+      }
+    });
   }
 
   /** Initial load: a failure here is fatal to the view and shows the error screen. */
