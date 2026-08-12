@@ -79,20 +79,20 @@ class IngestionEndToEndTest {
         List<ConsumerRecord<String, String>> records = consumeAll(1434);
         assertEquals(1434, records.size());
 
-        // (a) Wire-contract check on the key: Client_Information + "|" + Product_Information
-        // (see docs/file-spec.md). Real symbols can contain punctuation (e.g. "NK."), so we
-        // don't over-constrain the charset — instead we assert the exact structural defect
-        // from finding #2 is gone: the expiration date must not be a dashed ISO
-        // LocalDate.toString() (e.g. "2010-09-10"), it must be raw CCYYMMDD (e.g. "20100910").
-        Pattern productInfoPattern = Pattern.compile("^[A-Z0-9.]*\\d{8}$");
+        // (a) Wire-contract check on the key: 8 pipe-delimited fields
+        // clientType|clientNumber|accountNumber|subaccountNumber|exchangeCode|productGroupCode|symbol|yyyyMMdd
+        // The expiration date must be raw CCYYMMDD (e.g. "20100910"), not dashed ISO format (e.g. "2010-09-10").
+        // Real symbols can contain punctuation (e.g. "NK."), so we don't over-constrain the charset.
+        Pattern datePattern = Pattern.compile("^\\d{8}$");
         assertTrue(records.stream().allMatch(r -> {
             if (r.key() == null) {
                 return false;
             }
             String[] parts = r.key().split("\\|", -1);
-            return parts.length == 2 && !parts[0].isEmpty() && productInfoPattern.matcher(parts[1]).matches();
-        }), "every record key must be Client_Information|Product_Information with the expiration "
-                + "date as raw CCYYMMDD (no dashes), e.g. CL432100020001|SGXFUNK20100910");
+            return parts.length == 8 && !parts[0].isEmpty() && !parts[7].isEmpty() && datePattern.matcher(parts[7]).matches();
+        }), "every record key must have 8 pipe-delimited parts: "
+                + "clientType|clientNumber|accountNumber|subaccountNumber|exchangeCode|productGroupCode|symbol|yyyyMMdd, "
+                + "e.g. CL|4321|0002|0001|SGX|FU|NK|20100910");
 
         // (b) Wire-contract check on the value: deserialize the JSON payload back into a
         // FutureTransaction using a JavaTimeModule-aware ObjectMapper (mirroring what a real
