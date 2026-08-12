@@ -31,7 +31,7 @@ class IngestionControllerTest {
                 "fp-1", 3, 2, 1, List.of(new ParseError(3, "bad", "too short")), false);
         when(ingestionService.ingest(false)).thenReturn(result);
 
-        mockMvc.perform(post("/api/ingest"))
+        mockMvc.perform(post("/api/v1/ingest"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.fingerprint").value("fp-1"))
                 .andExpect(jsonPath("$.totalLines").value(3))
@@ -47,7 +47,7 @@ class IngestionControllerTest {
         IngestionResult result = new IngestionResult("fp-1", 3, 3, 0, List.of(), false);
         when(ingestionService.ingest(true)).thenReturn(result);
 
-        mockMvc.perform(post("/api/ingest").param("force", "true"))
+        mockMvc.perform(post("/api/v1/ingest").param("force", "true"))
                 .andExpect(status().isOk());
 
         verify(ingestionService).ingest(true);
@@ -57,7 +57,7 @@ class IngestionControllerTest {
     void kafkaPublishFailureReturns502() throws Exception {
         when(ingestionService.ingest(false)).thenThrow(new KafkaPublishException("all failed", List.of()));
 
-        mockMvc.perform(post("/api/ingest"))
+        mockMvc.perform(post("/api/v1/ingest"))
                 .andExpect(status().isBadGateway());
     }
 
@@ -66,7 +66,7 @@ class IngestionControllerTest {
         when(ingestionService.ingest(false))
                 .thenThrow(new IngestionFileNotFoundException(Path.of("/some/deep/absolute/missing.txt")));
 
-        mockMvc.perform(post("/api/ingest"))
+        mockMvc.perform(post("/api/v1/ingest"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("Ingestion file not found"))
                 .andExpect(jsonPath("$.error", org.hamcrest.Matchers.not(

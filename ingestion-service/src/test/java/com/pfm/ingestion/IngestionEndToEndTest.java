@@ -136,7 +136,7 @@ class IngestionEndToEndTest {
 
     private IngestionResult postIngest(String querySuffix) {
         ResponseEntity<IngestionResult> response =
-                restTemplate.postForEntity("/api/ingest" + querySuffix, null, IngestionResult.class);
+                restTemplate.postForEntity("/api/v1/ingest" + querySuffix, null, IngestionResult.class);
         assertEquals(200, response.getStatusCode().value());
         IngestionResult body = response.getBody();
         assertNotNull(body);
