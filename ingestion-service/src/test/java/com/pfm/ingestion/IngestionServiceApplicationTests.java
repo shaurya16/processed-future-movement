@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "spring.kafka.admin.auto-create=false")
+        properties = {"spring.kafka.admin.auto-create=false", "ingestion.topic=future-transactions"})
 class IngestionServiceApplicationTests {
 
     @Autowired
