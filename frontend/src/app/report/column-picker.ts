@@ -19,6 +19,7 @@ import { COLUMN_GROUPS, ColumnGroup, REPORT_COLUMNS } from './report-columns';
       @if (open()) {
         <div
           class="absolute right-0 z-10 mt-1 max-h-80 w-64 overflow-y-auto rounded-lg border border-rule bg-surface-1 p-3 shadow-lg"
+          (keydown.escape)="open.set(false)"
         >
           @for (group of groups; track group) {
             <p class="mt-2 text-xs font-semibold uppercase tracking-wide text-ink-muted first:mt-0">
