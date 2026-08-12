@@ -1,0 +1,120 @@
+<!--
+  Wide column selections scroll inside this container so the page body never
+  scrolls horizontally.
+-->
+<div class="overflow-x-auto rounded-lg border border-rule bg-surface-1">
+  <table class="w-full border-collapse text-sm">
+    <thead class="sticky top-0 bg-surface-1">
+      <tr class="border-b border-rule">
+        @for (column of columnPreferences.visibleColumns(); track column.id) {
+          <th
+            scope="col"
+            class="px-3 py-2 font-semibold text-ink-secondary"
+            [class.text-right]="column.align === 'right'"
+            [class.text-left]="column.align === 'left'"
+            [attr.aria-sort]="
+              filters.sortColumnId() === column.id
+                ? (filters.sortDirection() === 'asc' ? 'ascending' : 'descending')
+                : 'none'
+            "
+          >
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 hover:text-ink-primary"
+              (click)="filters.toggleSort(column.id)"
+            >
+              {{ column.label }}
+              <span aria-hidden="true" class="text-ink-muted">{{ sortIndicator(column) }}</span>
+            </button>
+          </th>
+        }
+      </tr>
+    </thead>
+
+    <tbody>
+      @for (entry of filters.rows(); track rowKey(entry)) {
+        <tr
+          class="border-b border-rule last:border-0 hover:bg-surface-page"
+          [class.row-changed]="changed().has(rowKey(entry))"
+        >
+          @for (column of columnPreferences.visibleColumns(); track column.id) {
+            <td
+              class="px-3 py-2 align-middle"
+              [class.text-right]="column.align === 'right'"
+              [class.tabular]="column.numeric"
+            >
+              @switch (column.render) {
+                @case ('divergingBar') {
+                  <!--
+                    Diverging bar off a centre baseline. The signed number is always
+                    present as text, so colour is never the only channel.
+                  -->
+                  <div class="flex items-center justify-end gap-2">
+                    <span class="tabular text-ink-primary">
+                      {{ entry.Total_Transaction_Amount }}
+                    </span>
+                    @if (bar(entry).side === 'flat') {
+                      <span class="text-xs text-ink-muted">flat</span>
+                    }
+                    <span class="relative hidden h-2 w-24 shrink-0 sm:block" aria-hidden="true">
+                      <span
+                        class="absolute inset-y-0 left-1/2 w-px bg-rule"
+                      ></span>
+                      @if (bar(entry).side === 'long') {
+                        <span
+                          class="absolute inset-y-0 left-1/2 rounded-r bg-net-long"
+                          [style.width.%]="bar(entry).percent / 2"
+                        ></span>
+                      }
+                      @if (bar(entry).side === 'short') {
+                        <span
+                          class="absolute inset-y-0 right-1/2 rounded-l bg-net-short"
+                          [style.width.%]="bar(entry).percent / 2"
+                        ></span>
+                      }
+                    </span>
+                  </div>
+                }
+                @case ('expiry') {
+                  <div class="flex items-center gap-2">
+                    <span>{{ entry.expirationDate }}</span>
+                    @if (expiry(entry).status === 'expired') {
+                      <span
+                        class="rounded bg-status-critical/15 px-1.5 py-0.5 text-xs text-status-critical"
+                      >
+                        ⚠ {{ expiry(entry).label }}
+                      </span>
+                    }
+                    @if (expiry(entry).status === 'near') {
+                      <span
+                        class="rounded bg-status-warning/20 px-1.5 py-0.5 text-xs text-ink-primary"
+                      >
+                        ◷ {{ expiry(entry).label }}
+                      </span>
+                    }
+                  </div>
+                }
+                @default {
+                  {{ cellText(column, entry) }}
+                }
+              }
+            </td>
+          }
+        </tr>
+      } @empty {
+        <tr>
+          <td
+            [attr.colspan]="columnPreferences.visibleColumns().length"
+            class="px-3 py-8 text-center text-ink-secondary"
+          >
+            @if (filters.activeFilterCount() > 0) {
+              No rows match the current filters ({{ filters.totalCount() }} total).
+            } @else {
+              No transactions recorded yet.
+            }
+          </td>
+        </tr>
+      }
+    </tbody>
+  </table>
+</div>
