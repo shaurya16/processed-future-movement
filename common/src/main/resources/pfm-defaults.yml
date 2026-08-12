@@ -1,2 +1,6 @@
+# Imported via spring.config.import by both services. NOTE: Spring Boot gives an
+# imported config-data document HIGHER precedence than the application.yml that
+# imports it -- a service cannot override these keys in its own application.yml.
+# Override via env var / system property (which still win over all config data).
 pfm:
   topic: ${PFM_TOPIC:future-transactions}

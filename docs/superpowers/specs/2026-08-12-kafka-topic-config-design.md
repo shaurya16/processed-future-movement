@@ -41,7 +41,7 @@ fact.
 |---|---|---|
 | Java (both services) | New `common/src/main/resources/pfm-defaults.yml`: `pfm.topic: ${PFM_TOPIC:future-transactions}` | Both `application.yml` files import it (`spring.config.import: classpath:pfm-defaults.yml`) and reference `${pfm.topic}` instead of owning their own literal |
 | Docker Compose | One `x-topic: &pfm-topic future-transactions` YAML anchor at the top of `docker-compose.yml` | `ingestion-service`, `processing-service`, and `wait-for-topic` each get `PFM_TOPIC: *pfm-topic` in their `environment:` block |
-| Kubernetes | New `k8s/topic-config.yaml` ConfigMap (`data.PFM_TOPIC: future-transactions`) | `ingestion-service.yaml`, `processing-service.yaml`'s main container, and its `wait-for-topic` initContainer all pull `PFM_TOPIC` via `configMapKeyRef` |
+| Kubernetes | New `k8s/01-topic-config.yaml` ConfigMap (`data.PFM_TOPIC: future-transactions`) | `ingestion-service.yaml`, `processing-service.yaml`'s main container, and its `wait-for-topic` initContainer all pull `PFM_TOPIC` via `configMapKeyRef` |
 
 Both `application.yml` files change from an independent literal:
 
@@ -158,7 +158,7 @@ echo "$PFM_TOPIC topic found, starting processing-service"
   which would have required documenting `PFM_TOPIC=future-transactions` on
   every standalone run command.)
 - `k8s/README.md` gets a one-line note that the topic name comes from
-  `k8s/topic-config.yaml`, settable per-deployment via `PFM_TOPIC`.
+  `k8s/01-topic-config.yaml`, settable per-deployment via `PFM_TOPIC`.
 
 ## Testing
 
