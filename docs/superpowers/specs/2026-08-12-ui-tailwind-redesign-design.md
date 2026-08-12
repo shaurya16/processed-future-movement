@@ -119,12 +119,18 @@ public record NetPosition(
         int tradeCount,
         LocalDate firstTransactionDate,
         LocalDate lastTransactionDate,
-        Instant lastUpdatedAt) {
+        Instant lastUpdatedAt,
+        Map<String, BigDecimal> feesByCurrency) {   // each fee under its own currency code
 
     public static NetPosition empty();
     public NetPosition plus(FutureTransaction tx, Instant observedAt);
 }
 ```
+
+`feesByCurrency` accumulates all three fee amounts — `exchBrokerFee`,
+`clearingFee`, `commission` — each keyed by its own currency field, so no two
+currencies are ever added together. It exists to feed the fee KPI tile; per-fee
+columns remain out of scope.
 
 `AggregationTopology` changes its `.aggregate(...)` seed to `NetPosition.empty()`
 and its accumulator to `plus(...)`, materialized with a JSON `NetPositionSerde`
@@ -159,7 +165,8 @@ public record ReportEntry(
         String exchangeCode, String productGroupCode, String symbol, LocalDate expirationDate,
         // measures, from NetPosition
         long grossLong, long grossShort, int tradeCount,
-        LocalDate firstTransactionDate, LocalDate lastTransactionDate, Instant lastUpdatedAt) {}
+        LocalDate firstTransactionDate, LocalDate lastTransactionDate, Instant lastUpdatedAt,
+        Map<String, BigDecimal> feesByCurrency) {}
 ```
 
 The three original properties keep their exact JSON names, so the change is
@@ -170,22 +177,37 @@ row order the golden CSV depends on.
 
 ### State store migration
 
-Both the key format and the value type change, so the existing
-`net-quantity-store` and its changelog topic are incompatible — Streams would
+Both the key format and the value type change, so any *pre-existing*
+`net-quantity-store` data and its changelog are incompatible — Streams would
 attempt to deserialize `Long`-serialized values as `NetPosition`.
 
-Resolution: **rename the store to `net-position-store` and change
-`spring.kafka.streams.application-id` from `processing-service` to
-`processing-service-v2`.** A new application-id means new changelog and
-consumer-group names, so Streams replays the source topic from the beginning and
-rebuilds — Kafka Streams defaults `auto.offset.reset` to `earliest` (unlike a
-plain consumer, which defaults to `latest`), and no explicit setting overrides it
-in `application.yml`. This avoids requiring operators to run
-`kafka-streams-application-reset`.
+**The store name stays `net-quantity-store` and `application-id` stays
+`processing-service`.** A `-v2` suffix would bake a version into an identifier
+that outlives the migration causing it by a long way, and would need a `-v3`
+next time. Migration is handled by teardown instead, which is legitimate here
+because **no deployment path in this repo persists state**:
 
-The orphaned `processing-service-*` changelog topics can be deleted after
-deploy; note this in `processing-service/README.md`. For local development
-`docker compose down -v` clears everything anyway.
+| Path | Kafka data | Streams `state.dir` |
+|---|---|---|
+| `docker compose` | no volumes declared at all — removed by `down` | container filesystem — removed by `down` |
+| `k8s` | `emptyDir: {}` in `kafka.yaml` — pod-lifetime only | no `volumeMounts` on processing-service — pod-lifetime only |
+| broker-only (`up -d kafka` + Maven) | container — removed by `down` | **on the host**, default `/tmp/kafka-streams/processing-service` |
+
+So the incompatible-changelog scenario cannot arise in the containerised paths;
+there is nothing to orphan. Only the broker-only development loop leaves state
+behind, because RocksDB then lives on the host rather than in a container.
+
+`processing-service/README.md` gains a teardown note covering both:
+
+```bash
+docker compose down -v                        # containerised paths
+rm -rf /tmp/kafka-streams/processing-service   # broker-only loop, host-side state
+```
+
+Kafka Streams defaults `auto.offset.reset` to `earliest` (unlike a plain
+consumer, which defaults to `latest`) and nothing overrides it in
+`application.yml`, so after teardown the source topic replays from the beginning
+and the store rebuilds with the new key format automatically.
 
 ---
 
@@ -376,6 +398,12 @@ correct. Badge thresholds: negative → `critical` "expired"; 0–7 days →
 `warning` "N days"; otherwise a plain date with no badge. Icon plus label in
 every case.
 
+**The badge must say what it is measured against.** Wording is "expired as of
+trade date" / "N days from trade date", not a bare "expired", so it cannot be
+misread as live contract status — the reader is looking at historical data and
+the badge is a statement about that data, not about today. This is display-only
+wording and trivially reversible if the source data ever becomes current.
+
 ### Filters
 
 One row above the table: dimension comboboxes for **client**, **account**, and
@@ -411,18 +439,28 @@ grouped bar chart":
 
 | Tile | Value |
 |---|---|
+| Transactions | `sum(tradeCount)` over filtered rows |
 | Client/product pairs | filtered row count |
 | Distinct clients | distinct `Client_Information` |
-| Trades aggregated | `sum(tradeCount)` |
 | Records ingested | `published`, from the status endpoint |
+| Fees | per-currency totals, e.g. `USD 12,480.50 · JPY 1,203,000` |
 
-The last two together are a genuine reconciliation: if `sum(tradeCount)` and
-`published` disagree, records were dropped between ingestion and aggregation.
-When they disagree the tile carries a `warning` badge.
+Transactions and records-ingested together are a genuine reconciliation: if
+`sum(tradeCount)` and `published` disagree, records were dropped between
+ingestion and aggregation. When they disagree the tile carries a `warning` badge.
 
 **Deliberately omitted: a "total net quantity" tile.** Summing net quantity
-across different products is not a meaningful number, and presenting one would
-invite false confidence.
+across different contracts adds quantities of different instruments, which is not
+a number. The KPI row is kept in full; only this one tile is dropped, and the
+tiles above replace it with aggregates that are all genuinely additive.
+
+**Fees are aggregated per currency, never blended.** `NetPosition` carries
+`Map<String, BigDecimal> feesByCurrency`, accumulating each of the three fee
+amounts (`exchBrokerFee`, `clearingFee`, `commission`) under **its own** currency
+code. Summing maps across rows is then always valid, and the tile renders one
+figure per currency. This sidesteps the cross-currency problem entirely rather
+than papering over it with a `MIXED` marker: there is no point at which two
+currencies are added together.
 
 ### Component structure
 
@@ -468,6 +506,9 @@ region and the page body never scrolls horizontally. The table header is sticky.
   `decode` rejects non-8-part input.
 - `NetPosition.plus` accumulates net, gross long, gross short, trade count, and
   min/max transaction date; net matches `sum(quantityLong - quantityShort)`.
+- `feesByCurrency` keys each of the three fee amounts under its own currency
+  code, and a transaction whose fee currencies differ from each other produces
+  separate map entries rather than one blended total.
 
 **`ingestion-service`**
 - `KafkaKeyBuilder` emits `ReportKey.encode()` output.
@@ -501,17 +542,29 @@ region and the page body never scrolls horizontally. The table header is sticky.
   `report.integration.spec.ts` updated for the new DTO and template.
 
 **Manual**
-- `docker compose up -d --build`, `curl -X POST localhost:8081/api/v1/ingest`,
+- **Start from `docker compose down -v --remove-orphans`**, the same pattern
+  `docs/superpowers/plans/2026-08-12-docker-compose-full-stack.md` already uses.
+  This is not hygiene — since the migration strategy is
+  "teardown rather than rename", starting from a torn-down state is what actually
+  *exercises* the migration path instead of assuming it. Verifying against a
+  broker that was never wiped would silently skip the one thing this decision
+  rests on.
+- Then `docker compose up -d --build`, `curl -X POST localhost:8081/api/v1/ingest`,
   open `localhost:8080`: verify columns, filters, both themes, auto-refresh on
-  and off, and that the downloaded CSV matches `sample-output/Output.csv`.
+  and off, the fee tile's per-currency figures, the "as of trade date" expiry
+  wording, and that the downloaded CSV matches `sample-output/Output.csv`.
 - Confirm `POST /api/v1/ingest` through the frontend origin returns 404.
+- For the broker-only loop, confirm `rm -rf /tmp/kafka-streams/processing-service`
+  is required and sufficient: without it, a store built by the pre-change code
+  fails to restore; with it, the store rebuilds cleanly.
 
 ## Out of scope
 
-- Fee and commission columns, and buy/sell and open/close split counts —
-  available from `FutureTransaction` and deliberately deferred. Fees carry
-  per-field currency codes, so any total needs `MIXED` handling for
-  cross-currency groups.
+- Per-row fee and commission **columns**, and buy/sell and open/close split
+  counts — available from `FutureTransaction` and deliberately deferred. Fee
+  *totals* are in scope as a per-currency KPI tile, backed by
+  `NetPosition.feesByCurrency`; what is deferred is surfacing the three fee types
+  as individual sortable columns.
 - Server-side filtering or pagination.
 - Triggering ingestion from the UI.
 - Exposing per-line parse errors (raw lines contain client data).
