@@ -306,7 +306,7 @@ public record ReportKey(
 Run: `mvn -q -pl common test -Dtest=ReportKeyTest`
 Expected: PASS — 7 tests.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add common/src/main/java/com/pfm/common/domain/ReportKey.java \
@@ -743,7 +743,7 @@ Expected: PASS. If `IngestionServiceTest` or `IngestionEndToEndTest` asserts on
 key strings, update those expectations to the 8-part form — the values are the
 same fields, differently delimited.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add ingestion-service/src/main/java/com/pfm/ingestion/kafka/KafkaKeyBuilder.java \
@@ -1420,7 +1420,38 @@ assertion at line ~90:
                 "CSV output must stay byte-identical to sample-output/Output.csv");
 ```
 
-- [ ] **Step 3: Run the golden test**
+- [ ] **Step 3: Make the golden test hermetic (do this BEFORE trusting it)**
+
+`FullPipelineGoldenTest` never sets `state.dir`, so Kafka Streams reuses its
+RocksDB directory across runs. This was observed producing an 8-row report — 3
+rows in the current key format plus 5 left over from a run two days earlier. The
+dangerous direction is the opposite one: if stale state happens to match the
+fixture, **the test passes without exercising the pipeline at all**. Since this
+test is the CSV contract lock, that must be impossible.
+
+Give the test its own throwaway state directory. Add a `@TempDir` field and pass
+it as a Streams property alongside the existing ones:
+
+```java
+    @TempDir
+    static Path streamsStateDir;
+```
+
+and in the `processingContext` builder's `.properties(...)` list, add:
+
+```java
+                        "spring.kafka.streams.state-dir=" + streamsStateDir.toAbsolutePath(),
+```
+
+Import `org.junit.jupiter.api.io.TempDir` and `java.nio.file.Path`. JUnit creates
+a fresh directory per run and deletes it afterwards, so the test can no longer
+inherit or leak state.
+
+Verify the fix actually bites: run the test twice in a row and confirm both runs
+report the same 5 rows. Before this change, a second run could differ from the
+first.
+
+- [ ] **Step 4: Run the golden test**
 
 Run: `mvn -q -pl processing-service -am test -Dtest=FullPipelineGoldenTest`
 Expected: PASS. This is the single most important verification in the plan — it
@@ -1431,7 +1462,7 @@ If it fails on row *order*, check that `ReportService` still sorts by
 `clientInformation` then `productInformation`. If it fails on *values*, the
 `plus` accumulator's `netQuantity` arithmetic is wrong.
 
-- [ ] **Step 4: Document the teardown in the processing-service README**
+- [ ] **Step 5: Document the teardown in the processing-service README**
 
 Add this section to `processing-service/README.md`:
 
@@ -1454,21 +1485,26 @@ kafka` with the services run via Maven), where Kafka Streams keeps RocksDB state
 on the **host**:
 
 ```bash
-docker compose down -v                          # containerised paths
-rm -rf /tmp/kafka-streams/processing-service    # broker-only loop, host-side state
+docker compose down -v                                    # containerised paths
+rm -rf "${TMPDIR:-/tmp}/kafka-streams/processing-service"  # broker-only loop, host-side state
 ```
+
+`${TMPDIR:-/tmp}` matters: Kafka Streams derives `state.dir` from `java.io.tmpdir`,
+which is `/tmp` on Linux but a per-user `/var/folders/.../T/` on macOS. A
+hardcoded `/tmp/kafka-streams` silently no-ops on macOS — the exact machine where
+the broker-only loop runs.
 
 Kafka Streams defaults `auto.offset.reset` to `earliest` (unlike a plain
 consumer, which defaults to `latest`), so after teardown the topic replays from
 the beginning and the store rebuilds with the new key format automatically.
 ```
 
-- [ ] **Step 5: Run the full backend suite**
+- [ ] **Step 6: Run the full backend suite**
 
 Run: `mvn -q test`
 Expected: PASS across `common`, `ingestion-service`, `processing-service`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add processing-service/src/test/resources/Output.csv \
