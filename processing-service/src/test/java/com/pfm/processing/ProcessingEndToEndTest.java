@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.pfm.common.domain.FutureTransaction;
+import com.pfm.common.domain.ReportKey;
 import com.pfm.processing.report.ReportEntry;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
@@ -43,7 +44,14 @@ import static org.junit.jupiter.api.Assertions.fail;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ProcessingEndToEndTest {
 
-    private static final String KEY = "CL432100020001|SGXFUNK20100910";
+    // Matches the key fields set on transaction() below. This test publishes directly via a
+    // raw KafkaProducer (no ingestion-service in the loop), so it must build the Kafka message
+    // key the same way KafkaKeyBuilder does in production: ReportKey.from(transaction).encode().
+    // A hardcoded "clientInformation|productInformation" literal would no longer decode -- the
+    // state store's key is now the full 8-field ReportKey encoding, not that 2-part string.
+    private static final ReportKey REPORT_KEY =
+            new ReportKey("CL", "4321", "0002", "0001", "SGX", "FU", "NK", LocalDate.of(2010, 9, 10));
+    private static final String KEY = REPORT_KEY.encode();
 
     @Container
     static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.9.2");
@@ -118,7 +126,7 @@ class ProcessingEndToEndTest {
         // createFutureTransactionsTopic() above, guaranteeing the topic exists before Kafka
         // Streams ever starts -- without it, no timeout here would help, since a stream thread
         // that dies from missing source topics never recovers.
-        String[] parts = key.split("\\|", 2);
+        ReportKey reportKey = ReportKey.decode(key);
         long deadline = System.currentTimeMillis() + 60_000;
         ResponseEntity<ReportEntry[]> lastResponse = null;
         while (System.currentTimeMillis() < deadline) {
@@ -127,8 +135,8 @@ class ProcessingEndToEndTest {
                 lastResponse = response;
                 if (response.getStatusCode().value() == 200 && response.getBody() != null) {
                     for (ReportEntry entry : response.getBody()) {
-                        if (entry.clientInformation().equals(parts[0])
-                                && entry.productInformation().equals(parts[1])
+                        if (entry.clientInformation().equals(reportKey.clientInformation())
+                                && entry.productInformation().equals(reportKey.productInformation())
                                 && entry.netQuantity() == expectedNetQuantity) {
                             return;
                         }
