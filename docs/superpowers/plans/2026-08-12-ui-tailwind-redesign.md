@@ -2486,3 +2486,657 @@ git commit -m "feat(frontend): add Tailwind v4 with the validated palette as the
 ```
 
 ---
+
+## Task 12: Expanded TS models and a refresh-safe `ReportService`
+
+**Files:**
+- Modify: `frontend/src/app/report/report-entry.ts`
+- Modify: `frontend/src/app/report/report.service.ts`
+- Test: `frontend/src/app/report/report.service.spec.ts`
+
+**Interfaces:**
+- Consumes: `readPreference` / `writePreference` (Task 11); the JSON shape from
+  Task 6 and Task 9.
+- Produces:
+  - `ReportEntry` interface (18 fields) and `IngestionStatus` interface — used by
+    Tasks 13–19.
+  - `ReportService` with signals `status`, `entries`, `errorMessage`,
+    `retryCount`, `stale`, `lastLoadedAt`, `autoRefresh`, and methods
+    `load()`, `refresh()`, `setAutoRefresh(on: boolean)`, `startPolling()`.
+
+**The behaviour this task exists to get right:** today any non-503 error sets
+`status='error'` and the template hides the table. Under a 5-second poll, one
+blip would blank the page. So `load()` (initial) and `refresh()` (poll/manual)
+must fail *differently*: initial failure shows the error screen; refresh failure
+keeps the last good rows and raises `stale`.
+
+Polling also pauses while the tab is hidden, and resumes with an immediate fetch
+so a returning tab is not up to 5s out of date.
+
+- [ ] **Step 1: Replace the TS models**
+
+Replace `frontend/src/app/report/report-entry.ts`:
+
+```ts
+/**
+ * One report row. The three PascalCase properties are the frozen legacy contract
+ * (they drive the CSV); everything else is additive.
+ *
+ * Dates arrive as ISO strings ("2010-09-10"), not Date objects — Jackson emits
+ * ISO because Spring Boot disables WRITE_DATES_AS_TIMESTAMPS by default.
+ */
+export interface ReportEntry {
+  Client_Information: string;
+  Product_Information: string;
+  Total_Transaction_Amount: number;
+
+  clientType: string;
+  clientNumber: string;
+  accountNumber: string;
+  subaccountNumber: string;
+  exchangeCode: string;
+  productGroupCode: string;
+  symbol: string;
+  expirationDate: string;
+
+  grossLong: number;
+  grossShort: number;
+  tradeCount: number;
+  firstTransactionDate: string | null;
+  lastTransactionDate: string | null;
+  lastUpdatedAt: string | null;
+  /** Keyed by currency code. Values are negative for debits — see the plan's constraints. */
+  feesByCurrency: Record<string, number>;
+}
+
+/** Provenance of the source file. Run fields are null until an ingestion has happened. */
+export interface IngestionStatus {
+  configuredPath: string;
+  fileExists: boolean;
+  fileSizeBytes: number | null;
+  fileLastModified: string | null;
+  lastIngestAt: string | null;
+  fingerprint: string | null;
+  totalLines: number | null;
+  published: number | null;
+  skipped: number | null;
+  errorCount: number | null;
+}
+```
+
+- [ ] **Step 2: Write the failing tests**
+
+Add to `frontend/src/app/report/report.service.spec.ts`. Keep every existing
+test — they must continue to pass unchanged. Add a row factory and the new cases:
+
+```ts
+function row(overrides: Partial<ReportEntry> = {}): ReportEntry {
+  return {
+    Client_Information: 'CL432100020001',
+    Product_Information: 'SGXFUNK20100910',
+    Total_Transaction_Amount: 46,
+    clientType: 'CL',
+    clientNumber: '4321',
+    accountNumber: '0002',
+    subaccountNumber: '0001',
+    exchangeCode: 'SGX',
+    productGroupCode: 'FU',
+    symbol: 'NK',
+    expirationDate: '2010-09-10',
+    grossLong: 46,
+    grossShort: 0,
+    tradeCount: 3,
+    firstTransactionDate: '2010-08-19',
+    lastTransactionDate: '2010-08-20',
+    lastUpdatedAt: '2026-08-12T14:31:52Z',
+    feesByCurrency: { USD: -0.9 },
+    ...overrides,
+  };
+}
+
+describe('ReportService refresh semantics', () => {
+  it('keeps the previously loaded rows when a refresh fails', () => {
+    // The regression this exists to prevent: with a 5s poll, one failed request
+    // must not blank a table the user is reading.
+    service.load();
+    httpMock.expectOne('/api/v1/report').flush([row()]);
+    expect(service.status()).toBe('ready');
+
+    service.refresh();
+    httpMock.expectOne('/api/v1/report').flush(
+      { error: 'boom' },
+      { status: 500, statusText: 'Server Error' },
+    );
+
+    expect(service.status()).toBe('ready');
+    expect(service.entries().length).toBe(1);
+    expect(service.stale()).toBe(true);
+    expect(service.errorMessage()).toBe('boom');
+  });
+
+  it('clears stale once a later refresh succeeds', () => {
+    service.load();
+    httpMock.expectOne('/api/v1/report').flush([row()]);
+    service.refresh();
+    httpMock.expectOne('/api/v1/report').flush(
+      { error: 'boom' },
+      { status: 500, statusText: 'Server Error' },
+    );
+    expect(service.stale()).toBe(true);
+
+    service.refresh();
+    httpMock.expectOne('/api/v1/report').flush([row(), row({ symbol: 'N1' })]);
+
+    expect(service.stale()).toBe(false);
+    expect(service.errorMessage()).toBeNull();
+    expect(service.entries().length).toBe(2);
+  });
+
+  it('shows the error screen when the INITIAL load fails', () => {
+    service.load();
+    httpMock.expectOne('/api/v1/report').flush(
+      { error: 'boom' },
+      { status: 500, statusText: 'Server Error' },
+    );
+
+    expect(service.status()).toBe('error');
+    expect(service.entries()).toEqual([]);
+  });
+
+  it('treats a 503 during refresh as stale rather than restarting the retry loop', () => {
+    service.load();
+    httpMock.expectOne('/api/v1/report').flush([row()]);
+
+    service.refresh();
+    httpMock.expectOne('/api/v1/report').flush(
+      { error: 'not ready' },
+      { status: 503, statusText: 'Service Unavailable' },
+    );
+
+    expect(service.status()).toBe('ready');
+    expect(service.stale()).toBe(true);
+    // No pending retry timer should have been scheduled.
+    httpMock.verify();
+  });
+
+  it('records lastLoadedAt on success', () => {
+    expect(service.lastLoadedAt()).toBeNull();
+    service.load();
+    httpMock.expectOne('/api/v1/report').flush([row()]);
+    expect(service.lastLoadedAt()).not.toBeNull();
+  });
+});
+
+describe('ReportService polling', () => {
+  it('polls every 5s once started', async () => {
+    service.load();
+    httpMock.expectOne('/api/v1/report').flush([row()]);
+
+    service.startPolling();
+    await vi.advanceTimersByTimeAsync(5000);
+    httpMock.expectOne('/api/v1/report').flush([row()]);
+    await vi.advanceTimersByTimeAsync(5000);
+    httpMock.expectOne('/api/v1/report').flush([row()]);
+  });
+
+  it('does not poll while auto-refresh is off', async () => {
+    service.load();
+    httpMock.expectOne('/api/v1/report').flush([row()]);
+
+    service.setAutoRefresh(false);
+    service.startPolling();
+    await vi.advanceTimersByTimeAsync(15000);
+
+    // No outstanding requests: httpMock.verify() in afterEach would fail otherwise.
+    httpMock.verify();
+  });
+
+  it('stops polling while the tab is hidden and refetches immediately on return', async () => {
+    service.load();
+    httpMock.expectOne('/api/v1/report').flush([row()]);
+    service.startPolling();
+
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(15000);
+    httpMock.verify(); // nothing fired while hidden
+
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    // Resuming refetches at once rather than waiting out the interval.
+    httpMock.expectOne('/api/v1/report').flush([row()]);
+
+    vi.restoreAllMocks();
+  });
+
+  it('persists the auto-refresh choice', () => {
+    service.setAutoRefresh(false);
+    expect(localStorage.getItem('pfm.autoRefresh')).toBe('false');
+  });
+});
+```
+
+Add `import { ReportEntry } from './report-entry';` if absent, and
+`localStorage.clear()` to the existing `beforeEach`.
+
+- [ ] **Step 3: Run the tests to verify they fail**
+
+Run: `cd frontend && npx vitest run src/app/report/report.service.spec.ts`
+Expected: FAIL — `service.stale is not a function`.
+
+- [ ] **Step 4: Rewrite `ReportService`**
+
+Replace `frontend/src/app/report/report.service.ts`:
+
+```ts
+import { Injectable, inject, signal } from '@angular/core';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { timer } from 'rxjs';
+import { ReportEntry } from './report-entry';
+import { readPreference, writePreference } from '../shared/local-preference';
+
+const RETRY_DELAY_MS = 3000;
+const POLL_INTERVAL_MS = 5000;
+const AUTO_REFRESH_KEY = 'pfm.autoRefresh';
+
+export type ReportStatus = 'loading' | 'ready' | 'error';
+
+@Injectable({ providedIn: 'root' })
+export class ReportService {
+  private readonly http = inject(HttpClient);
+
+  private readonly _status = signal<ReportStatus>('loading');
+  private readonly _entries = signal<ReportEntry[]>([]);
+  private readonly _errorMessage = signal<string | null>(null);
+  private readonly _retryCount = signal<number>(0);
+  private readonly _stale = signal<boolean>(false);
+  private readonly _lastLoadedAt = signal<Date | null>(null);
+  private readonly _autoRefresh = signal<boolean>(readPreference(AUTO_REFRESH_KEY, true));
+
+  readonly status = this._status.asReadonly();
+  readonly entries = this._entries.asReadonly();
+  readonly errorMessage = this._errorMessage.asReadonly();
+  readonly retryCount = this._retryCount.asReadonly();
+  readonly stale = this._stale.asReadonly();
+  readonly lastLoadedAt = this._lastLoadedAt.asReadonly();
+  readonly autoRefresh = this._autoRefresh.asReadonly();
+
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    document.addEventListener('visibilitychange', () => this.syncPolling(true));
+  }
+
+  /** Initial load: a failure here is fatal to the view and shows the error screen. */
+  load(): void {
+    this._status.set('loading');
+    this._errorMessage.set(null);
+    this._retryCount.set(0);
+    this._stale.set(false);
+    this.fetch(true);
+  }
+
+  /** Poll or manual refresh: a failure here must preserve whatever is on screen. */
+  refresh(): void {
+    this.fetch(false);
+  }
+
+  startPolling(): void {
+    this.syncPolling(false);
+  }
+
+  setAutoRefresh(on: boolean): void {
+    this._autoRefresh.set(on);
+    writePreference(AUTO_REFRESH_KEY, on);
+    this.syncPolling(false);
+  }
+
+  /**
+   * @param fetchOnResume refetch immediately when polling (re)starts. True for a
+   *        tab becoming visible again — its data may be up to an interval stale —
+   *        and false when the caller has just loaded, to avoid a double request.
+   */
+  private syncPolling(fetchOnResume: boolean): void {
+    const shouldPoll = this._autoRefresh() && document.visibilityState !== 'hidden';
+
+    if (shouldPoll && this.pollTimer === null) {
+      this.pollTimer = setInterval(() => this.refresh(), POLL_INTERVAL_MS);
+      if (fetchOnResume) {
+        this.refresh();
+      }
+      return;
+    }
+    if (!shouldPoll && this.pollTimer !== null) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  private fetch(initial: boolean): void {
+    this.http.get<ReportEntry[]>('/api/v1/report').subscribe({
+      next: (entries) => {
+        this._entries.set(entries);
+        this._status.set('ready');
+        this._stale.set(false);
+        this._errorMessage.set(null);
+        this._lastLoadedAt.set(new Date());
+      },
+      error: (err: HttpErrorResponse) => {
+        // 503 means "Kafka Streams still starting". Worth waiting out on first
+        // load; on a refresh we already have data, so just mark it stale.
+        if (err.status === 503 && initial) {
+          timer(RETRY_DELAY_MS).subscribe(() => {
+            this._retryCount.update((count) => count + 1);
+            this.fetch(true);
+          });
+          return;
+        }
+
+        const message =
+          err.error?.error ?? err.message ?? 'Unable to reach processing-service.';
+
+        if (initial || this._status() !== 'ready') {
+          this._status.set('error');
+          this._errorMessage.set(message);
+          return;
+        }
+
+        // Data is already on screen: keep it and flag it rather than blanking the view.
+        this._stale.set(true);
+        this._errorMessage.set(message);
+      },
+    });
+  }
+}
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `cd frontend && npx vitest run src/app/report/report.service.spec.ts`
+Expected: PASS — the new tests plus all pre-existing 503-retry tests.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add frontend/src/app/report/report-entry.ts \
+        frontend/src/app/report/report.service.ts \
+        frontend/src/app/report/report.service.spec.ts
+git commit -m "feat(frontend): distinguish load from refresh failures and add 5s polling"
+```
+
+---
+
+## Task 13: Column definitions and persisted visibility
+
+**Files:**
+- Create: `frontend/src/app/report/report-columns.ts`
+- Create: `frontend/src/app/report/column-preferences.ts`
+- Test: `frontend/src/app/report/column-preferences.spec.ts`
+
+**Interfaces:**
+- Consumes: `ReportEntry` (Task 12), `readPreference`/`writePreference` (Task 11).
+- Produces:
+  - `ColumnDef` interface, `REPORT_COLUMNS: readonly ColumnDef[]`,
+    `DEFAULT_VISIBLE_COLUMN_IDS: readonly string[]`.
+  - `ColumnPreferences` (injectable) with `visibleIds: Signal<readonly string[]>`,
+    `visibleColumns: Signal<readonly ColumnDef[]>`, `toggle(id)`, `reset()`,
+    `isVisible(id): boolean`.
+- Tasks 16, 17 render from `visibleColumns()`.
+
+One declarative array drives the header, the cells and the picker, so a header
+can never desynchronise from its cells and adding a column is a one-line change.
+Eight of the seventeen columns are visible by default.
+
+- [ ] **Step 1: Create the column definitions**
+
+Create `frontend/src/app/report/report-columns.ts`:
+
+```ts
+import { ReportEntry } from './report-entry';
+
+export type ColumnGroup = 'Client' | 'Product' | 'Position' | 'Activity' | 'Legacy';
+
+/** How a cell is drawn. `divergingBar` and `expiry` get bespoke templates. */
+export type ColumnRender = 'text' | 'date' | 'number' | 'divergingBar' | 'expiry';
+
+export interface ColumnDef {
+  id: string;
+  label: string;
+  group: ColumnGroup;
+  /** Right-align numbers so digits line up; left-align identifiers. */
+  align: 'left' | 'right';
+  /** Applies tabular-nums so columns of figures align vertically. */
+  numeric: boolean;
+  defaultVisible: boolean;
+  render: ColumnRender;
+  /** Value used for sorting and for the global search. */
+  sortValue: (entry: ReportEntry) => string | number;
+}
+
+export const REPORT_COLUMNS: readonly ColumnDef[] = [
+  // --- Client ---
+  { id: 'clientNumber', label: 'Client', group: 'Client', align: 'left', numeric: false,
+    defaultVisible: true, render: 'text', sortValue: (e) => e.clientNumber },
+  { id: 'accountNumber', label: 'Account', group: 'Client', align: 'left', numeric: false,
+    defaultVisible: true, render: 'text', sortValue: (e) => e.accountNumber },
+  { id: 'clientType', label: 'Client type', group: 'Client', align: 'left', numeric: false,
+    defaultVisible: false, render: 'text', sortValue: (e) => e.clientType },
+  { id: 'subaccountNumber', label: 'Subaccount', group: 'Client', align: 'left', numeric: false,
+    defaultVisible: false, render: 'text', sortValue: (e) => e.subaccountNumber },
+
+  // --- Product ---
+  { id: 'symbol', label: 'Symbol', group: 'Product', align: 'left', numeric: false,
+    defaultVisible: true, render: 'text', sortValue: (e) => e.symbol },
+  { id: 'expirationDate', label: 'Expiry', group: 'Product', align: 'left', numeric: false,
+    defaultVisible: true, render: 'expiry', sortValue: (e) => e.expirationDate },
+  { id: 'exchangeCode', label: 'Exchange', group: 'Product', align: 'left', numeric: false,
+    defaultVisible: false, render: 'text', sortValue: (e) => e.exchangeCode },
+  { id: 'productGroupCode', label: 'Group', group: 'Product', align: 'left', numeric: false,
+    defaultVisible: false, render: 'text', sortValue: (e) => e.productGroupCode },
+
+  // --- Position ---
+  { id: 'netQuantity', label: 'Net', group: 'Position', align: 'right', numeric: true,
+    defaultVisible: true, render: 'divergingBar', sortValue: (e) => e.Total_Transaction_Amount },
+  { id: 'grossLong', label: 'Gross long', group: 'Position', align: 'right', numeric: true,
+    defaultVisible: true, render: 'number', sortValue: (e) => e.grossLong },
+  { id: 'grossShort', label: 'Gross short', group: 'Position', align: 'right', numeric: true,
+    defaultVisible: true, render: 'number', sortValue: (e) => e.grossShort },
+  { id: 'tradeCount', label: 'Trades', group: 'Position', align: 'right', numeric: true,
+    defaultVisible: true, render: 'number', sortValue: (e) => e.tradeCount },
+
+  // --- Activity ---
+  { id: 'firstTransactionDate', label: 'First trade', group: 'Activity', align: 'left',
+    numeric: false, defaultVisible: false, render: 'date',
+    sortValue: (e) => e.firstTransactionDate ?? '' },
+  { id: 'lastTransactionDate', label: 'Last trade', group: 'Activity', align: 'left',
+    numeric: false, defaultVisible: false, render: 'date',
+    sortValue: (e) => e.lastTransactionDate ?? '' },
+  { id: 'lastUpdatedAt', label: 'Updated', group: 'Activity', align: 'left', numeric: false,
+    defaultVisible: false, render: 'date', sortValue: (e) => e.lastUpdatedAt ?? '' },
+
+  // --- Legacy: the concatenated strings, available but off by default ---
+  { id: 'Client_Information', label: 'Client_Information', group: 'Legacy', align: 'left',
+    numeric: false, defaultVisible: false, render: 'text', sortValue: (e) => e.Client_Information },
+  { id: 'Product_Information', label: 'Product_Information', group: 'Legacy', align: 'left',
+    numeric: false, defaultVisible: false, render: 'text',
+    sortValue: (e) => e.Product_Information },
+];
+
+export const DEFAULT_VISIBLE_COLUMN_IDS: readonly string[] = REPORT_COLUMNS.filter(
+  (column) => column.defaultVisible,
+).map((column) => column.id);
+
+export const COLUMN_GROUPS: readonly ColumnGroup[] = [
+  'Client',
+  'Product',
+  'Position',
+  'Activity',
+  'Legacy',
+];
+```
+
+- [ ] **Step 2: Write the failing test**
+
+Create `frontend/src/app/report/column-preferences.spec.ts`:
+
+```ts
+import { TestBed } from '@angular/core/testing';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { ColumnPreferences } from './column-preferences';
+import { DEFAULT_VISIBLE_COLUMN_IDS, REPORT_COLUMNS } from './report-columns';
+
+describe('ColumnPreferences', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    TestBed.resetTestingModule();
+  });
+
+  it('starts with the eight default columns', () => {
+    const prefs = TestBed.inject(ColumnPreferences);
+
+    expect(prefs.visibleIds()).toEqual(DEFAULT_VISIBLE_COLUMN_IDS);
+    expect(prefs.visibleIds().length).toBe(8);
+  });
+
+  it('exposes seventeen definitions in total', () => {
+    expect(REPORT_COLUMNS.length).toBe(17);
+  });
+
+  it('preserves declaration order regardless of toggle order', () => {
+    const prefs = TestBed.inject(ColumnPreferences);
+
+    prefs.toggle('Client_Information'); // last in declaration order
+    prefs.toggle('clientType');         // third
+
+    const ids = prefs.visibleColumns().map((c) => c.id);
+    const declarationOrder = REPORT_COLUMNS.map((c) => c.id).filter((id) => ids.includes(id));
+    expect(ids).toEqual(declarationOrder);
+  });
+
+  it('toggles a column off and on', () => {
+    const prefs = TestBed.inject(ColumnPreferences);
+
+    prefs.toggle('tradeCount');
+    expect(prefs.isVisible('tradeCount')).toBe(false);
+
+    prefs.toggle('tradeCount');
+    expect(prefs.isVisible('tradeCount')).toBe(true);
+  });
+
+  it('persists across instances', () => {
+    TestBed.inject(ColumnPreferences).toggle('grossShort');
+
+    TestBed.resetTestingModule();
+    expect(TestBed.inject(ColumnPreferences).isVisible('grossShort')).toBe(false);
+  });
+
+  it('falls back to defaults when stored ids are unknown', () => {
+    // A future release renaming a column must not leave anyone with a broken table.
+    localStorage.setItem('pfm.visibleColumns', JSON.stringify(['nope', 'alsoNope']));
+
+    expect(TestBed.inject(ColumnPreferences).visibleIds()).toEqual(DEFAULT_VISIBLE_COLUMN_IDS);
+  });
+
+  it('drops unknown ids but keeps recognised ones', () => {
+    localStorage.setItem('pfm.visibleColumns', JSON.stringify(['symbol', 'nope']));
+
+    expect(TestBed.inject(ColumnPreferences).visibleIds()).toEqual(['symbol']);
+  });
+
+  it('falls back to defaults when the stored value is not an array', () => {
+    localStorage.setItem('pfm.visibleColumns', JSON.stringify({ symbol: true }));
+
+    expect(TestBed.inject(ColumnPreferences).visibleIds()).toEqual(DEFAULT_VISIBLE_COLUMN_IDS);
+  });
+
+  it('reset restores the defaults', () => {
+    const prefs = TestBed.inject(ColumnPreferences);
+    prefs.toggle('symbol');
+    prefs.toggle('clientType');
+
+    prefs.reset();
+
+    expect(prefs.visibleIds()).toEqual(DEFAULT_VISIBLE_COLUMN_IDS);
+  });
+});
+```
+
+- [ ] **Step 3: Run the test to verify it fails**
+
+Run: `cd frontend && npx vitest run src/app/report/column-preferences.spec.ts`
+Expected: FAIL — cannot resolve `./column-preferences`.
+
+- [ ] **Step 4: Implement `ColumnPreferences`**
+
+Create `frontend/src/app/report/column-preferences.ts`:
+
+```ts
+import { Injectable, computed, signal } from '@angular/core';
+import { readPreference, writePreference } from '../shared/local-preference';
+import { ColumnDef, DEFAULT_VISIBLE_COLUMN_IDS, REPORT_COLUMNS } from './report-columns';
+
+const STORAGE_KEY = 'pfm.visibleColumns';
+
+@Injectable({ providedIn: 'root' })
+export class ColumnPreferences {
+  private readonly _visibleIds = signal<readonly string[]>(restore());
+
+  readonly visibleIds = this._visibleIds.asReadonly();
+
+  /**
+   * Always in declaration order, never in the order the user toggled things —
+   * otherwise columns would jump around as they are switched on.
+   */
+  readonly visibleColumns = computed<readonly ColumnDef[]>(() => {
+    const visible = new Set(this._visibleIds());
+    return REPORT_COLUMNS.filter((column) => visible.has(column.id));
+  });
+
+  isVisible(id: string): boolean {
+    return this._visibleIds().includes(id);
+  }
+
+  toggle(id: string): void {
+    const next = this.isVisible(id)
+      ? this._visibleIds().filter((visibleId) => visibleId !== id)
+      : [...this._visibleIds(), id];
+    this._visibleIds.set(next);
+    writePreference(STORAGE_KEY, next);
+  }
+
+  reset(): void {
+    this._visibleIds.set([...DEFAULT_VISIBLE_COLUMN_IDS]);
+    writePreference(STORAGE_KEY, DEFAULT_VISIBLE_COLUMN_IDS);
+  }
+}
+
+/**
+ * Stored ids are filtered against the current definitions, so renaming or removing
+ * a column in a future release cannot strand a user with an empty table.
+ */
+function restore(): readonly string[] {
+  const stored = readPreference<unknown>(STORAGE_KEY, null);
+  if (!Array.isArray(stored)) {
+    return [...DEFAULT_VISIBLE_COLUMN_IDS];
+  }
+  const known = new Set(REPORT_COLUMNS.map((column) => column.id));
+  const filtered = stored.filter((id): id is string => typeof id === 'string' && known.has(id));
+  return filtered.length > 0 ? filtered : [...DEFAULT_VISIBLE_COLUMN_IDS];
+}
+```
+
+- [ ] **Step 5: Run the test to verify it passes**
+
+Run: `cd frontend && npx vitest run src/app/report/column-preferences.spec.ts`
+Expected: PASS — 9 tests.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add frontend/src/app/report/report-columns.ts \
+        frontend/src/app/report/column-preferences.ts \
+        frontend/src/app/report/column-preferences.spec.ts
+git commit -m "feat(frontend): add column definitions and persisted column visibility"
+```
+
+---
