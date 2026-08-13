@@ -123,7 +123,7 @@ so you can drop in your own `Input.txt` and re-ingest with no rebuild.
 | **`sample-output/Output.csv` is reference truth** for the sample input | Pinned by `FullPipelineGoldenTest` and `CsvFixtureDriftTest` |
 | **A single ingestion source** | See [Scalability](docs/design-notes.md#scalability) for the single-instance constraints this implies |
 
-Why each assumption is safe, and what breaks if `D` = debit is wrong:
+The `D` = debit assumption in depth:
 [design notes](docs/design-notes.md#assumptions-in-depth).
 
 ## API endpoints
@@ -142,8 +142,9 @@ same paths.
 `GET /api/v1/report/csv` sets `Content-Disposition: attachment; filename="Output.csv"`,
 so browsers download it as a file with the required name rather than rendering it inline.
 
-Why the API returns `503` rather than an empty `200`, and why the CSV and JSON
-payloads differ: [design notes](docs/design-notes.md#why-503-and-not-an-empty-200).
+Why the API returns `503` rather than an empty `200`:
+[design notes](docs/design-notes.md#why-503-and-not-an-empty-200). Why the CSV and JSON
+payloads differ: [design notes](docs/design-notes.md#csv-vs-json-a-deliberate-divergence).
 
 ## Requirements traceability
 
