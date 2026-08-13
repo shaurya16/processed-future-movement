@@ -39,10 +39,10 @@ class DedupProcessorTest {
         builder.addStateStore(Stores.keyValueStoreBuilder(
                 Stores.persistentKeyValueStore(DedupProcessor.STORE_NAME), Serdes.String(), Serdes.Long()));
         KStream<String, FutureTransaction> deduped = builder
-                .stream("input-topic", Consumed.with(Serdes.String(), TransactionSerde.instance()))
+                .stream("input-topic", Consumed.with(Serdes.String(), TransactionSerde.create()))
                 .processValues(DedupProcessor::new, DedupProcessor.STORE_NAME);
         deduped.to("output-topic", org.apache.kafka.streams.kstream.Produced.with(
-                Serdes.String(), TransactionSerde.instance()));
+                Serdes.String(), TransactionSerde.create()));
 
         Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, "dedup-processor-test");
@@ -50,9 +50,9 @@ class DedupProcessorTest {
         driver = new TopologyTestDriver(builder.build(), props);
 
         inputTopic = driver.createInputTopic("input-topic", Serdes.String().serializer(),
-                TransactionSerde.instance().serializer());
+                TransactionSerde.create().serializer());
         outputTopic = driver.createOutputTopic("output-topic", Serdes.String().deserializer(),
-                TransactionSerde.instance().deserializer());
+                TransactionSerde.create().deserializer());
     }
 
     @AfterEach
