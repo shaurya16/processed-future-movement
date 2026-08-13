@@ -76,9 +76,14 @@ export class ReportFilters {
     const entries = this.reportService.entries();
     const result = {} as Record<FilterDimensionId, string[]>;
     for (const dimension of FILTER_DIMENSIONS) {
-      result[dimension.id] = [...new Set(entries.map((entry) => entry[dimension.id]))].sort(
-        (a, b) => a.localeCompare(b),
-      );
+      // '' is the "All" sentinel (see FilterCriteria.selection). The fixed-width
+      // parser only trims fields, so a genuinely blank value is representable in
+      // the data; without this filter it would render a second, indistinguishable
+      // "" option and those rows would be unfilterable.
+      const values = entries
+        .map((entry) => entry[dimension.id])
+        .filter((value) => value !== '');
+      result[dimension.id] = [...new Set(values)].sort((a, b) => a.localeCompare(b));
     }
     return result;
   });

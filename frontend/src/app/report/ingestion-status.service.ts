@@ -13,8 +13,12 @@ export class IngestionStatusService {
   load(): void {
     this.http.get<IngestionStatus>('/api/v1/ingest/status').subscribe({
       next: (status) => this._status.set(status),
-      // Provenance is supplementary; losing it must never break the report view.
-      error: () => this._status.set(null),
+      // load() now runs on every report poll (every 5s), not just once at init.
+      // A transient failure must not blank a status that's already on screen:
+      // keep the last-known value rather than nulling it out. If nothing has
+      // loaded successfully yet, this is a no-op and status stays null, so the
+      // "unavailable" empty state is still reachable on first load.
+      error: () => {},
     });
   }
 }

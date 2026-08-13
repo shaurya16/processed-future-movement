@@ -45,7 +45,7 @@ describe('IngestionStatusService', () => {
     expect(service.available()).toBe(true);
   });
 
-  it('degrades to unavailable on failure without throwing', () => {
+  it('degrades to unavailable on a failure before any successful load', () => {
     // The report must not be affected by the status endpoint being down.
     service.load();
     httpMock.expectOne('/api/v1/ingest/status').flush(
@@ -55,5 +55,22 @@ describe('IngestionStatusService', () => {
 
     expect(service.status()).toBeNull();
     expect(service.available()).toBe(false);
+  });
+
+  it('keeps the last-known status when a later poll fails', () => {
+    // load() now runs on every report poll (every 5s). A transient failure
+    // after a successful load must not blank a status that's already on screen.
+    service.load();
+    httpMock.expectOne('/api/v1/ingest/status').flush(SAMPLE);
+    expect(service.status()).toEqual(SAMPLE);
+
+    service.load();
+    httpMock.expectOne('/api/v1/ingest/status').flush(
+      { error: 'nope' },
+      { status: 500, statusText: 'Server Error' },
+    );
+
+    expect(service.status()).toEqual(SAMPLE);
+    expect(service.available()).toBe(true);
   });
 });

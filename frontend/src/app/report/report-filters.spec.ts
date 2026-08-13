@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { FilterCriteria, filterAndSort } from './report-filters';
+import { signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { FilterCriteria, ReportFilters, filterAndSort } from './report-filters';
 import { NO_SELECTION } from './report-filter-dimensions';
 import { ReportEntry } from './report-entry';
+import { ReportService } from './report.service';
 
 function row(overrides: Partial<ReportEntry> = {}): ReportEntry {
   return {
@@ -190,5 +193,79 @@ describe('filterAndSort', () => {
 
   it('ignores an unknown sort column rather than throwing', () => {
     expect(filterAndSort([row()], { ...NO_FILTERS, sortColumnId: 'nope' }).length).toBe(1);
+  });
+});
+
+function setupFilters(entries: ReportEntry[]): ReportFilters {
+  TestBed.configureTestingModule({
+    providers: [{ provide: ReportService, useValue: { entries: signal(entries) } }],
+  });
+  return TestBed.inject(ReportFilters);
+}
+
+describe('ReportFilters', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+
+  it('dedupes and sorts options per dimension', () => {
+    const filters = setupFilters([
+      row({ symbol: 'NK', clientNumber: '4321' }),
+      row({ symbol: 'N1', clientNumber: '4321' }),
+      row({ symbol: 'NK', clientNumber: '1234' }),
+    ]);
+
+    expect(filters.options().symbol).toEqual(['N1', 'NK']);
+    expect(filters.options().clientNumber).toEqual(['1234', '4321']);
+  });
+
+  it('starts with every dimension unfiltered and no active filters', () => {
+    const filters = setupFilters([row()]);
+
+    expect(filters.activeFilterCount()).toBe(0);
+  });
+
+  it('counts one active filter per selected dimension, plus search', () => {
+    const filters = setupFilters([row()]);
+
+    filters.setDimension('clientNumber', '4321');
+    filters.setDimension('symbol', 'NK');
+    expect(filters.activeFilterCount()).toBe(2);
+
+    filters.setSearch('nk');
+    expect(filters.activeFilterCount()).toBe(3);
+  });
+
+  it('treats a whitespace-only search as inactive', () => {
+    const filters = setupFilters([row()]);
+
+    filters.setSearch('   ');
+
+    expect(filters.activeFilterCount()).toBe(0);
+  });
+
+  it('setDimension updates only the named dimension', () => {
+    const filters = setupFilters([row()]);
+
+    filters.setDimension('clientNumber', '4321');
+    filters.setDimension('symbol', 'NK');
+
+    expect(filters.selection()).toEqual({
+      ...NO_SELECTION,
+      clientNumber: '4321',
+      symbol: 'NK',
+    });
+  });
+
+  it('clearAll resets every dimension and the search', () => {
+    const filters = setupFilters([row()]);
+
+    filters.setDimension('clientNumber', '4321');
+    filters.setDimension('symbol', 'NK');
+    filters.setSearch('nk');
+
+    filters.clearAll();
+
+    expect(filters.selection()).toEqual({ ...NO_SELECTION });
+    expect(filters.search()).toBe('');
+    expect(filters.activeFilterCount()).toBe(0);
   });
 });
