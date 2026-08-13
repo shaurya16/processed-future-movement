@@ -49,13 +49,16 @@ frozen and pinned by the golden test.
 `GET /api/v1/report` returns more: the same three fields under the same names, plus the
 decomposed key dimensions the UI filters and sorts on (client type, account number,
 exchange code, symbol, expiration date…) and additional measures that make a row
-interpretable — gross long, gross short, trade count, first and last transaction dates,
-and per-currency fee totals. A net quantity of zero is ambiguous without the gross figures;
-the UI needs to show the difference between "no activity" and "bought and sold in equal
-measure".
+interpretable — gross long, gross short, trade count, and first and last transaction dates.
+A net quantity of zero is ambiguous without the gross figures; the UI needs to show the
+difference between "no activity" and "bought and sold in equal measure".
 
-The CSV has not drifted from the spec. The JSON is additive, and the additions exist for
-the UI. See the
+`feesByCurrency` is the one field the UI does *not* read: the Fees KPI tile was removed
+(it reconciled poorly against a running aggregate) but the field was deliberately kept on
+the API, since it is the only place the parsed fee data surfaces at all. Its totals come
+back negative — see the `D` = debit assumption.
+
+The CSV has not drifted from the spec. The JSON is additive. See the
 [UI redesign design doc](superpowers/specs/2026-08-12-ui-tailwind-redesign-design.md).
 
 ## Why re-ingesting a different file adds to the totals
