@@ -85,6 +85,34 @@ describe('ReportService', () => {
     expect(service.retryCount()).toBe(2);
   });
 
+  it('stays loading when a poll tick 503s during the initial retry loop', async () => {
+    // Report.ngOnInit calls both, so the 5s poll interval runs concurrently with
+    // the 3s initial-load retry chain. A background 503 must yield to that chain
+    // rather than flipping the view to the error screen during normal startup.
+    service.load();
+    service.startPolling();
+
+    httpMock.expectOne('/api/v1/report').flush(
+      { error: 'not ready' },
+      { status: 503, statusText: 'Service Unavailable' },
+    );
+    expect(service.status()).toBe('loading');
+
+    // The poll tick lands before the store finishes starting.
+    await vi.advanceTimersByTimeAsync(5000);
+    httpMock
+      .match('/api/v1/report')
+      .forEach((req) =>
+        req.flush({ error: 'not ready' }, { status: 503, statusText: 'Service Unavailable' }),
+      );
+
+    expect(service.status()).toBe('loading');
+    expect(service.errorMessage()).toBeNull();
+
+    service.setAutoRefresh(false);
+    httpMock.match('/api/v1/report').forEach((req) => req.flush([]));
+  });
+
   it('keeps incrementing retryCount past the 10-attempt threshold without capping retries', async () => {
     service.load();
 

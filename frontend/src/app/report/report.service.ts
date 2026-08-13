@@ -32,6 +32,13 @@ export class ReportService {
 
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
+  /**
+   * True from load() until the initial fetch settles — including across its 503
+   * retry chain. Distinguishes "an initial load is genuinely in flight" from the
+   * pre-load default status, which is also 'loading'.
+   */
+  private initialFetchInFlight = false;
+
   constructor() {
     const onVisibilityChange = () => this.syncPolling(true);
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -53,6 +60,7 @@ export class ReportService {
     this._errorMessage.set(null);
     this._retryCount.set(0);
     this._stale.set(false);
+    this.initialFetchInFlight = true;
     this.fetch(true);
   }
 
@@ -95,6 +103,7 @@ export class ReportService {
   private fetch(initial: boolean): void {
     this.http.get<ReportEntry[]>('/api/v1/report').subscribe({
       next: (entries) => {
+        this.initialFetchInFlight = false;
         this._entries.set(entries);
         this._status.set('ready');
         this._stale.set(false);
@@ -111,6 +120,16 @@ export class ReportService {
           });
           return;
         }
+
+        // A poll tick can fire while the initial load is still retrying a 503
+        // (Report.ngOnInit starts both). The retry chain owns the view state
+        // until it resolves; a background failure must not pre-empt it, or a
+        // slow Streams startup shows the error screen instead of the spinner.
+        if (!initial && this.initialFetchInFlight) {
+          return;
+        }
+
+        this.initialFetchInFlight = false;
 
         const message =
           err.error?.error ?? err.message ?? 'Unable to reach processing-service.';
