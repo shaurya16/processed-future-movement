@@ -285,12 +285,18 @@ frontend's components and stores.
 | **In-memory ingestion status** | Last-run status is held in the process and is lost on restart |
 | **Single-instance processing** | `processing-service` cannot be scaled out without a cross-instance query strategy — see [design notes](docs/design-notes.md#scalability) |
 
+A structured review of the finished code turned up a further set of issues — none of them
+currently breaking — that were recorded rather than fixed, because each needs a design
+decision rather than a mechanical edit. They are written up with file references and
+suggested fixes in [Follow-ups](docs/follow-ups.md).
+
 ## Further reading
 
 | Doc | What it covers |
 |---|---|
 | [Architecture](docs/architecture.md) | The detailed diagram, the message key, dedup, the state stores, startup ordering |
 | [Design notes](docs/design-notes.md) | Why it is built this way — rationale, assumptions in depth, scalability, and the nine per-slice design docs |
+| [Follow-ups](docs/follow-ups.md) | Known issues found by review and deliberately not fixed, with file references and suggested fixes |
 | [File spec](docs/file-spec.md) | The fixed-width record layout |
 | [CLAUDE.md](CLAUDE.md) | Operational context for working on the repo: build gotchas, load-bearing invariants, and the assumptions baked into the code |
 
