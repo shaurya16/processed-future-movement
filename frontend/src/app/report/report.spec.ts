@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Report } from './report';
 import { ReportService } from './report.service';
 import { ReportFilters } from './report-filters';
+import { NO_SELECTION } from './report-filter-dimensions';
 import { ColumnPreferences } from './column-preferences';
 import { IngestionStatusService } from './ingestion-status.service';
 import { REPORT_COLUMNS } from './report-columns';
@@ -28,21 +29,22 @@ function setup(overrides: {
   };
   const statusService = { status: signal(null), available: signal(false), load: vi.fn() };
   const filters = {
-    client: signal(''),
-    account: signal(''),
-    product: signal(''),
+    selection: signal({ ...NO_SELECTION }),
     search: signal(''),
-    clientOptions: signal<string[]>([]),
-    accountOptions: signal<string[]>([]),
-    productOptions: signal<string[]>([]),
+    options: signal({
+      clientType: [] as string[],
+      clientNumber: [] as string[],
+      exchangeCode: [] as string[],
+      productGroupCode: [] as string[],
+      symbol: [] as string[],
+      expirationDate: [] as string[],
+    }),
     rows: signal([]),
     totalCount: signal(0),
     activeFilterCount: signal(0),
     sortColumnId: signal<string | null>(null),
     sortDirection: signal<'asc' | 'desc'>('asc'),
-    setClient: vi.fn(),
-    setAccount: vi.fn(),
-    setProduct: vi.fn(),
+    setDimension: vi.fn(),
     setSearch: vi.fn(),
     clearAll: vi.fn(),
     toggleSort: vi.fn(),

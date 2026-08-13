@@ -3,22 +3,24 @@ import { TestBed } from '@angular/core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FilterBar } from './filter-bar';
 import { ReportFilters } from './report-filters';
+import { FILTER_DIMENSIONS, NO_SELECTION } from './report-filter-dimensions';
 
 function setup() {
   const filters = {
-    client: signal(''),
-    account: signal(''),
-    product: signal(''),
+    selection: signal({ ...NO_SELECTION }),
     search: signal(''),
-    clientOptions: signal(['CL123400020001', 'CL432100020001']),
-    accountOptions: signal(['0002', '0003']),
-    productOptions: signal(['CMEFUNK.20100910', 'SGXFUNK20100910']),
+    options: signal({
+      clientType: ['CL', 'IN'],
+      clientNumber: ['1234', '4321'],
+      exchangeCode: ['CME', 'SGX'],
+      productGroupCode: ['FU'],
+      symbol: ['N1', 'NK', 'NK.'],
+      expirationDate: ['2010-09-10', '2010-12-10'],
+    }),
     rows: signal([]),
     totalCount: signal(5),
     activeFilterCount: signal(0),
-    setClient: vi.fn(),
-    setAccount: vi.fn(),
-    setProduct: vi.fn(),
+    setDimension: vi.fn(),
     setSearch: vi.fn(),
     clearAll: vi.fn(),
   };
@@ -32,18 +34,62 @@ function setup() {
 describe('FilterBar', () => {
   beforeEach(() => TestBed.resetTestingModule());
 
-  it('populates each dimension select from the data, plus an All option', async () => {
+  it('renders one select per dimension and no account filter', async () => {
     setup();
     const fixture = TestBed.createComponent(FilterBar);
     fixture.detectChanges();
     await fixture.whenStable();
 
-    const clientSelect: HTMLSelectElement = fixture.nativeElement.querySelector(
-      'select[data-testid="filter-client"]',
+    for (const dimension of FILTER_DIMENSIONS) {
+      expect(
+        fixture.nativeElement.querySelector(`select[data-testid="filter-${dimension.id}"]`),
+        `missing select for ${dimension.id}`,
+      ).not.toBeNull();
+    }
+    // Account and subaccount are deliberately not filterable.
+    expect(fixture.nativeElement.querySelector('[data-testid="filter-accountNumber"]')).toBeNull();
+  });
+
+  it('populates each select from the data, plus an All option', async () => {
+    setup();
+    const fixture = TestBed.createComponent(FilterBar);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const symbols: HTMLSelectElement = fixture.nativeElement.querySelector(
+      'select[data-testid="filter-symbol"]',
     );
-    // 2 values + "All"
-    expect(clientSelect.options.length).toBe(3);
-    expect(clientSelect.options[0].textContent).toContain('All');
+    // 3 values + "All"
+    expect(symbols.options.length).toBe(4);
+    expect(symbols.options[0].textContent).toContain('All');
+  });
+
+  it('displays expiry formatted but keeps the raw ISO string as the value', async () => {
+    setup();
+    const fixture = TestBed.createComponent(FilterBar);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const expiry: HTMLSelectElement = fixture.nativeElement.querySelector(
+      'select[data-testid="filter-expirationDate"]',
+    );
+    expect(expiry.options[1].textContent).toContain('10 Sep 2010');
+    expect(expiry.options[1].value).toBe('2010-09-10');
+  });
+
+  it('forwards a dimension selection', async () => {
+    const filters = setup();
+    const fixture = TestBed.createComponent(FilterBar);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const select: HTMLSelectElement = fixture.nativeElement.querySelector(
+      'select[data-testid="filter-clientNumber"]',
+    );
+    select.value = '4321';
+    select.dispatchEvent(new Event('change'));
+
+    expect(filters.setDimension).toHaveBeenCalledWith('clientNumber', '4321');
   });
 
   it('reports the visible-of-total count', async () => {

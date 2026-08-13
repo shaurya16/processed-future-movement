@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FilterCriteria, filterAndSort } from './report-filters';
+import { NO_SELECTION } from './report-filter-dimensions';
 import { ReportEntry } from './report-entry';
 
 function row(overrides: Partial<ReportEntry> = {}): ReportEntry {
@@ -27,13 +28,15 @@ function row(overrides: Partial<ReportEntry> = {}): ReportEntry {
 }
 
 const NO_FILTERS: FilterCriteria = {
-  client: '',
-  account: '',
-  product: '',
+  selection: { ...NO_SELECTION },
   search: '',
   sortColumnId: null,
   sortDirection: 'asc',
 };
+
+function withSelection(overrides: Partial<typeof NO_SELECTION>): FilterCriteria {
+  return { ...NO_FILTERS, selection: { ...NO_SELECTION, ...overrides } };
+}
 
 describe('filterAndSort', () => {
   it('returns everything when no filter is set', () => {
@@ -42,44 +45,76 @@ describe('filterAndSort', () => {
     expect(filterAndSort(rows, NO_FILTERS).length).toBe(2);
   });
 
-  it('filters by client information', () => {
-    const rows = [row(), row({ Client_Information: 'CL123400030001' })];
-
-    const result = filterAndSort(rows, { ...NO_FILTERS, client: 'CL123400030001' });
-
-    expect(result.length).toBe(1);
-    expect(result[0].Client_Information).toBe('CL123400030001');
-  });
-
-  it('filters by account number', () => {
-    const rows = [row({ accountNumber: '0002' }), row({ accountNumber: '0003' })];
-
-    const result = filterAndSort(rows, { ...NO_FILTERS, account: '0003' });
-
-    expect(result.length).toBe(1);
-    expect(result[0].accountNumber).toBe('0003');
-  });
-
-  it('filters by product information', () => {
-    const rows = [row(), row({ Product_Information: 'CMEFUNK.20100910' })];
-
-    const result = filterAndSort(rows, { ...NO_FILTERS, product: 'CMEFUNK.20100910' });
-
-    expect(result.length).toBe(1);
-  });
-
-  it('composes filters with AND', () => {
+  it('filters by client number, spanning that client\'s accounts', () => {
     const rows = [
-      row({ accountNumber: '0002', Product_Information: 'SGXFUNK20100910' }),
-      row({ accountNumber: '0003', Product_Information: 'SGXFUNK20100910' }),
-      row({ accountNumber: '0003', Product_Information: 'CMEFUNK.20100910' }),
+      row({ clientNumber: '4321', accountNumber: '0002' }),
+      row({ clientNumber: '4321', accountNumber: '0003' }),
+      row({ clientNumber: '1234', accountNumber: '0002' }),
     ];
 
-    const result = filterAndSort(rows, {
-      ...NO_FILTERS,
-      account: '0003',
-      product: 'CMEFUNK.20100910',
-    });
+    const result = filterAndSort(rows, withSelection({ clientNumber: '4321' }));
+
+    expect(result.length).toBe(2);
+    expect(result.map((r) => r.accountNumber)).toEqual(['0002', '0003']);
+  });
+
+  it('filters by client type', () => {
+    const rows = [row({ clientType: 'CL' }), row({ clientType: 'IN' })];
+
+    const result = filterAndSort(rows, withSelection({ clientType: 'IN' }));
+
+    expect(result.length).toBe(1);
+    expect(result[0].clientType).toBe('IN');
+  });
+
+  it('filters by exchange, spanning every symbol traded there', () => {
+    const rows = [
+      row({ exchangeCode: 'CME', symbol: 'N1' }),
+      row({ exchangeCode: 'CME', symbol: 'NK.' }),
+      row({ exchangeCode: 'SGX', symbol: 'NK' }),
+    ];
+
+    const result = filterAndSort(rows, withSelection({ exchangeCode: 'CME' }));
+
+    expect(result.length).toBe(2);
+    expect(result.map((r) => r.symbol)).toEqual(['N1', 'NK.']);
+  });
+
+  it('filters by product group', () => {
+    const rows = [row({ productGroupCode: 'FU' }), row({ productGroupCode: 'OP' })];
+
+    expect(filterAndSort(rows, withSelection({ productGroupCode: 'OP' })).length).toBe(1);
+  });
+
+  it('filters by symbol', () => {
+    const rows = [row({ symbol: 'NK' }), row({ symbol: 'N1' })];
+
+    const result = filterAndSort(rows, withSelection({ symbol: 'N1' }));
+
+    expect(result.length).toBe(1);
+    expect(result[0].symbol).toBe('N1');
+  });
+
+  it('filters by expiry on the raw ISO value, not a formatted one', () => {
+    const rows = [row({ expirationDate: '2010-09-10' }), row({ expirationDate: '2010-12-10' })];
+
+    expect(filterAndSort(rows, withSelection({ expirationDate: '2010-12-10' })).length).toBe(1);
+    // A formatted value must never match: the comparison is an exact string match.
+    expect(filterAndSort(rows, withSelection({ expirationDate: '10 Dec 2010' })).length).toBe(0);
+  });
+
+  it('composes every dimension with AND', () => {
+    const rows = [
+      row({ clientNumber: '4321', exchangeCode: 'CME', symbol: 'N1' }),
+      row({ clientNumber: '4321', exchangeCode: 'SGX', symbol: 'N1' }),
+      row({ clientNumber: '1234', exchangeCode: 'CME', symbol: 'N1' }),
+      row({ clientNumber: '4321', exchangeCode: 'CME', symbol: 'NK' }),
+    ];
+
+    const result = filterAndSort(
+      rows,
+      withSelection({ clientNumber: '4321', exchangeCode: 'CME', symbol: 'N1' }),
+    );
 
     expect(result.length).toBe(1);
   });
@@ -103,7 +138,7 @@ describe('filterAndSort', () => {
   });
 
   it('returns an empty array when filters exclude everything', () => {
-    expect(filterAndSort([row()], { ...NO_FILTERS, account: 'nope' })).toEqual([]);
+    expect(filterAndSort([row()], withSelection({ clientNumber: 'nope' }))).toEqual([]);
   });
 
   it('sorts ascending by a string column', () => {
