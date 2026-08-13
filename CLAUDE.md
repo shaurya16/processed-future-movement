@@ -53,7 +53,11 @@ Frontend on 8080, ingestion-service 8081, processing-service 8082, Kafka 9092.
 Kubernetes (kind) path is in [k8s/README.md](k8s/README.md).
 
 `./sample-data` is mounted read-only into `ingestion-service`, so the input file
-can be swapped on the host without rebuilding the image.
+can be swapped on the host without rebuilding the image. `INGESTION_FILE_PATH`
+overrides which file under that mount gets ingested, and
+`python3 scripts/gen-test-data.py` writes error-case and 7000-record fixtures into
+`sample-data/generated/` — see the README. Run `docker compose down -v` between
+fixtures, or the aggregate carries over.
 
 ## Endpoints
 
@@ -116,9 +120,9 @@ Each of these is load-bearing and none is self-evident from the surrounding code
 
 - **`D` = debit = negative** (`FutureTransactionFactory`). All 717 sample records
   carry `D` on all three money fields and there is no `C` example, so the
-  accounting convention is assumed rather than verified. This became load-bearing
-  once fees were surfaced in the UI — fee totals display as negative, which is
-  expected, not a bug.
+  accounting convention is assumed rather than verified. It decides the sign of
+  `feesByCurrency` in the report API — those totals come back negative, which is
+  expected, not a bug. Nothing the UI or the CSV displays depends on it.
 - Quantity signs: blank or `+` is positive, `-` negates.
 - Records are 176 bytes with trailing FILLER stripped; the spec says 303.
 - `sample-output/Output.csv` is the reference truth for the sample input, and the

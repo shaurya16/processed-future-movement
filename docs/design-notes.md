@@ -75,8 +75,9 @@ the one that carries weight:
 The `D` = debit assumption is the one to watch. It is confirmed *consistent* across the
 sample — all 717 records carry `D` at positions 86, 102 and 118 — but not *verified*,
 because there is no `C` example anywhere in the sample, so the accounting convention is
-inferred rather than observed. It became load-bearing only once fees were surfaced in
-the UI; before that it affected nothing the report displayed.
+inferred rather than observed. It decides the sign of the per-currency fee totals in the
+`/api/v1/report` response; the net quantities the report table and the CSV display are
+unaffected by it.
 
 ## Scalability
 
