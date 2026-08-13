@@ -31,7 +31,7 @@ flowchart LR
 | [`common`](common/) | Fixed-width parsing, domain model (`FutureTransaction`, `ReportKey`, `NetPosition`), Kafka message schema — shared by both services so parsing logic exists exactly once |
 | [`ingestion-service`](ingestion-service/) | `POST /api/v1/ingest` reads the fixed-width file and publishes one Kafka event per record: JSON value, keyed by `ReportKey`, each carrying a content-derived `transactionId` header. Idempotent per file version |
 | [`processing-service`](processing-service/) | Kafka Streams consumer: dedupes on `transactionId`, maintains a running per-(client, product) net-quantity aggregate, exposes it via REST as JSON and CSV |
-| [`frontend`](frontend/) | Angular UI: 17 available columns (8 shown by default, choice persisted), client / account / product filters plus global search, sortable columns, a diverging net-quantity bar, per-currency fee KPIs, light/dark themes, 5-second auto-refresh with manual fallback. A failed refresh keeps the last good data rather than blanking the table |
+| [`frontend`](frontend/) | Angular UI: 17 available columns (9 shown by default, choice persisted), six decomposed filter dimensions (client type, client number, exchange, group, symbol, expiry) plus global search, sortable columns, a diverging net-quantity bar, KPI tiles including distinct products, light/dark themes, 5-second auto-refresh with manual fallback. A failed refresh keeps the last good data rather than blanking the table |
 | [`k8s`](k8s/) | Kubernetes manifests for the whole stack in a `pfm` namespace, plus Dockerfiles for all three application images |
 
 The detailed diagram, the message key, dedup and the state stores are in
@@ -123,10 +123,10 @@ records are layout-correct by construction.
 python3 scripts/gen-test-data.py
 ```
 
-| File | Records | What it exercises |
+| File | Lines | What it exercises |
 |---|---|---|
 | `large-7000.txt` | 7000 | Volume, and every filter dropdown with several options |
-| `mixed-errors.txt` | 200 | 5 bad lines, 5 different reasons — partial success |
+| `mixed-errors.txt` | 200 | Five corrupted lines — partial success |
 | `truncated-line.txt` | 50 | A line shorter than 176 bytes |
 | `bad-quantity.txt` | 50 | A non-numeric quantity field |
 | `bad-date.txt` | 50 | An impossible expiration date (`20101332`) |
@@ -153,7 +153,7 @@ that does not exist.
 
 | Assumption | Basis |
 |---|---|
-| **`D` = debit = negative** on the three money fields | All 717 sample records carry `D` at positions 86, 102 and 118. There is no `C` example anywhere in the sample, so the accounting convention is *assumed*, not verified from data. This became load-bearing once fees were surfaced in the UI — before that it affected nothing the report displayed |
+| **`D` = debit = negative** on the three money fields | All 717 sample records carry `D` at positions 86, 102 and 118. There is no `C` example anywhere in the sample, so the accounting convention is *assumed*, not verified from data |
 | **Quantity signs**: blank or `+` is positive, `-` negates | Standard fixed-width convention; consistent with the sample |
 | **Records are 176 bytes** with trailing `FILLER` stripped | The spec says 303 bytes; the sample file has the 127-byte trailing `FILLER` stripped. See [docs/file-spec.md](docs/file-spec.md) |
 | **`sample-output/Output.csv` is reference truth** for the sample input | Pinned by `FullPipelineGoldenTest` and `CsvFixtureDriftTest` |
