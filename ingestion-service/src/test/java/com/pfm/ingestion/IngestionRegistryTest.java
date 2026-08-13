@@ -85,6 +85,26 @@ class IngestionRegistryTest {
     }
 
     @Test
+    void forceComputeEvictsAGoodCachedResultWhenTheForcedOneIsUncacheable() {
+        IngestionRegistry registry = new IngestionRegistry();
+        AtomicInteger invocations = new AtomicInteger();
+        Supplier<IngestionResult> supplier = () -> {
+            int call = invocations.incrementAndGet();
+            return new IngestionResult("fp", call, call, 0, List.of(), false);
+        };
+
+        // A good result is cached, then a forced run produces an uncacheable one.
+        // The stale good entry must go too, or the next non-forced call serves a
+        // result that the forced run has already superseded.
+        registry.getOrCompute("fp", supplier);
+        registry.forceCompute("fp", supplier, result -> false);
+        IngestionRegistry.CacheOutcome next = registry.getOrCompute("fp", supplier);
+
+        assertFalse(next.cached());
+        assertEquals(3, invocations.get());
+    }
+
+    @Test
     void concurrentCallsForSameFingerprintComputeExactlyOnce() throws Exception {
         IngestionRegistry registry = new IngestionRegistry();
         AtomicInteger invocations = new AtomicInteger();

@@ -62,7 +62,8 @@ public class IngestionService {
         }
 
         if (force) {
-            return registry.forceCompute(fingerprint, () -> runIngestion(path, fingerprint));
+            return registry.forceCompute(fingerprint, () -> runIngestion(path, fingerprint),
+                    IngestionService::hasNoKafkaSendFailures);
         }
 
         IngestionRegistry.CacheOutcome outcome = registry.getOrCompute(
@@ -78,8 +79,8 @@ public class IngestionService {
      * deterministic for a given file and caching them is fine; Kafka send failures (tagged
      * with lineNumber == -1, see runIngestion below) are transient infrastructure failures,
      * and caching a batch that has known un-retried send failures would mean a financial
-     * pipeline silently treats a partially-ingested file as fully ingested forever. See
-     * finding #5 of the final-review fix wave for the full reasoning.
+     * pipeline silently treats a partially-ingested file as fully ingested forever.
+     * Applies to the forced path too — see {@link IngestionRegistry#forceCompute}.
      */
     private static boolean hasNoKafkaSendFailures(IngestionResult result) {
         return result.errors().stream().noneMatch(error -> error.lineNumber() == -1);
