@@ -4,3 +4,4 @@ dist/
 target/
 .git/
 .superpowers/
+sample-data/generated/

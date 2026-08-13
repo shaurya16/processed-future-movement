@@ -41,13 +41,16 @@ RECORD_COUNT = 7000
 def patch(line: str, field: tuple[int, int], value: str) -> str:
     """Code fields are left-justified and space-padded."""
     start, length = field
+    assert len(value) <= length, f"{value!r} is longer than field width {length}"
     return line[: start - 1] + value.ljust(length)[:length] + line[start - 1 + length :]
 
 
 def patch_numeric(line: str, field: tuple[int, int], value: int) -> str:
     """Quantity fields are right-justified and zero-padded."""
     start, length = field
-    return line[: start - 1] + str(value).rjust(length, "0")[:length] + line[start - 1 + length :]
+    text = str(value)
+    assert len(text) <= length, f"{value} is longer than field width {length}"
+    return line[: start - 1] + text.rjust(length, "0")[:length] + line[start - 1 + length :]
 
 
 def vary(line: str, i: int) -> str:
@@ -107,7 +110,10 @@ def main() -> None:
 
     write("empty.txt", [])
 
-    # The realistic case: 200 lines, 5 of them bad, five different reasons.
+    # The realistic case: 200 lines, 5 of them corrupted. Three of the five
+    # (truncated, blank, garbage) all trip the same too-short-line guard in
+    # FixedWidthRecordParser; only the quantity and date faults reach distinct
+    # parser paths.
     mixed = valid[:200]
     mixed[30] = mixed[30][:80]
     mixed[60] = patch(mixed[60], QUANTITY_LONG, "ABCDEFGHIJ")

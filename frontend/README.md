@@ -47,7 +47,7 @@ Three `localStorage` keys survive a reload:
 
 - `pfm.theme` — Auto / Light / Dark, cycled by the theme toggle.
 - `pfm.autoRefresh` — whether the 5-second poll is running.
-- `pfm.visibleColumns` — which of the 17 report columns are shown.
+- `pfm.visibleColumns.v2` — which of the 17 report columns are shown.
 
 ## Auto-refresh
 
