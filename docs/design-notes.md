@@ -69,13 +69,8 @@ The mechanism is the content-derived `transactionId`:
 
 ## Assumptions in depth
 
-| Assumption | Basis |
-|---|---|
-| **`D` = debit = negative** on the three money fields | All 717 sample records carry `D` at positions 86, 102 and 118. There is no `C` example anywhere in the sample, so the accounting convention is *assumed*, not verified from data. This became load-bearing once fees were surfaced in the UI — before that it affected nothing the report displayed |
-| **Quantity signs**: blank or `+` is positive, `-` negates | Standard fixed-width convention; consistent with the sample |
-| **Records are 176 bytes** with trailing `FILLER` stripped | The spec says 303 bytes; the sample file has the 127-byte trailing `FILLER` stripped. See [file-spec.md](file-spec.md) |
-| **`sample-output/Output.csv` is reference truth** for the sample input | Pinned by `FullPipelineGoldenTest` and `CsvFixtureDriftTest` |
-| **A single ingestion source** | See [Scalability](#scalability) for the single-instance constraints this implies |
+The assumptions themselves are tabled in the [README](../README.md#assumptions). This is
+the one that carries weight:
 
 The `D` = debit assumption is the one to watch. It is confirmed *consistent* across the
 sample — all 717 records carry `D` at positions 86, 102 and 118 — but not *verified*,

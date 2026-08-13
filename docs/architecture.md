@@ -78,11 +78,8 @@ after a restart rather than recomputing it from the source topic.
 
 ## Startup ordering
 
-Kafka Streams validates its topology against the source topic at startup, so
-`processing-service` cannot start before the `future-transactions` topic exists. Under
-Docker Compose a one-shot `wait-for-topic` container polls until the topic is there and
-then exits 0. In Kubernetes the same gate is an `initContainer` on the
-`processing-service` pod (`../k8s/processing-service.yaml`).
+In Kubernetes, the startup gate is an `initContainer` on the
+`processing-service` pod (`k8s/processing-service.yaml`).
 
 Why the gate exists rather than an application-code retry loop:
 [design notes](design-notes.md#why-the-startup-gate-exists).
