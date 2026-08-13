@@ -105,6 +105,44 @@ class FullPipelineGoldenTest {
         String csv = awaitFullReportCsv(rest, expected);
         assertEquals(expected, csv,
                 "CSV output must stay byte-identical to sample-output/Output.csv");
+
+        // Re-ingest the same file. transactionId is sha256(contentHash + ":" + lineNumber),
+        // so all 717 records are republished with identical ids and DedupProcessor must drop
+        // every one, leaving the aggregate untouched.
+        //
+        // This is the only assertion that exercises the transactionId header contract across
+        // the module boundary: ingestion-service writes the header and processing-service
+        // reads it, and on drift dedup silently stops working (the processor logs a warning
+        // and forwards anyway) rather than failing. The single-ingest assertion above cannot
+        // catch that -- an undeduped first pass still produces a byte-identical CSV.
+        IngestionResult reingest = rest.postForObject(
+                "http://localhost:18081/api/v1/ingest?force=true", null, IngestionResult.class);
+        assertEquals(717, reingest.published(), "force=true must republish every record");
+
+        assertReportStaysByteIdentical(rest, expected);
+    }
+
+    /**
+     * Asserts the report does not change while the republished duplicates are consumed.
+     * A "wait for convergence" poll would pass trivially here — the report already equals
+     * the expected content — so this instead watches for divergence over a window long
+     * enough for 717 records to be consumed and folded in. If dedup were broken, every
+     * total would double and the very first mismatch fails the test.
+     */
+    private void assertReportStaysByteIdentical(RestTemplate rest, String expectedCsv) {
+        long deadline = System.currentTimeMillis() + 15_000;
+        while (System.currentTimeMillis() < deadline) {
+            String body = rest.getForObject("http://localhost:18082/api/v1/report/csv", String.class);
+            assertEquals(expectedCsv, body,
+                    "re-ingesting the same file must be a no-op; duplicate transactionIds were "
+                            + "not deduplicated, so the aggregate double-counted");
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     private String awaitFullReportCsv(RestTemplate rest, String expectedCsv) {
