@@ -113,6 +113,42 @@ so you can drop in your own `Input.txt` and re-ingest with no rebuild.
 > Why this is designed behaviour, and not a bug:
 > [design notes](docs/design-notes.md#why-re-ingesting-a-different-file-adds-to-the-totals).
 
+### Generated test fixtures
+
+`scripts/gen-test-data.py` writes fixtures into `sample-data/generated/`
+(gitignored) by patching fixed-width slices of real sample records, so generated
+records are layout-correct by construction.
+
+```bash
+python3 scripts/gen-test-data.py
+```
+
+| File | Records | What it exercises |
+|---|---|---|
+| `large-7000.txt` | 7000 | Volume, and every filter dropdown with several options |
+| `mixed-errors.txt` | 200 | 5 bad lines, 5 different reasons — partial success |
+| `truncated-line.txt` | 50 | A line shorter than 176 bytes |
+| `bad-quantity.txt` | 50 | A non-numeric quantity field |
+| `bad-date.txt` | 50 | An impossible expiration date (`20101332`) |
+| `blank-lines.txt` | 52 | Blank and whitespace-only lines |
+| `all-invalid.txt` | 10 | Nothing parseable — `published: 0`, empty report, no crash |
+| `empty.txt` | 0 | A zero-length file |
+
+Point the ingestion service at one with `INGESTION_FILE_PATH`:
+
+```bash
+docker compose down -v
+INGESTION_FILE_PATH=/app/sample-data/generated/large-7000.txt docker compose up -d
+curl -X POST localhost:8081/api/v1/ingest
+```
+
+`docker compose down -v` is not optional. The report is a running aggregate, so
+ingesting a different file without wiping the state stores adds to the existing
+totals rather than replacing them, and the numbers will look wrong.
+
+For the missing-file path (HTTP 404), point `INGESTION_FILE_PATH` at any path
+that does not exist.
+
 ## Assumptions
 
 | Assumption | Basis |
