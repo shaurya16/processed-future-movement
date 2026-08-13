@@ -66,7 +66,7 @@ clientType | clientNumber | accountNumber | subaccountNumber
 so re-ingesting the same file produces the same ids, `DedupProcessor` recognises them
 in `seen-transaction-ids`, and the totals do not double. This is what makes ingestion
 safely repeatable — and it is also what makes a *different* file add to the totals
-rather than replace them (see the [caveat](../README.md#using-your-own-file) below).
+rather than replace them (see the [caveat](../README.md#using-your-own-file)).
 
 ## State stores
 
