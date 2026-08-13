@@ -30,3 +30,7 @@ npm-debug.log*
 # Generated test fixtures (scripts/gen-test-data.py) -- reproducible, and
 # large-7000.txt alone is ~1.3 MB
 sample-data/generated/
+
+# Working copy written by scripts/run.sh when given a file argument; it is
+# whatever the caller passed in, so it does not belong in the repo.
+sample-data/custom-input.txt
