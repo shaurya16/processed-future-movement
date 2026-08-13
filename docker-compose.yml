@@ -40,7 +40,9 @@ services:
     environment:
       KAFKA_BOOTSTRAP_SERVERS: 'broker:19092'
       PFM_TOPIC: *pfm-topic
-      INGESTION_FILE_PATH: '/app/sample-data/Input.txt'
+      # Overridable so a generated fixture can be ingested without editing this
+      # file; sample-data/ is already mounted, so any path under it resolves.
+      INGESTION_FILE_PATH: ${INGESTION_FILE_PATH:-/app/sample-data/Input.txt}
     volumes:
       # Shadows the sample-data/ copy baked into the image, so the host file can be
       # swapped for your own without rebuilding. Read-only: the service only reads it.
