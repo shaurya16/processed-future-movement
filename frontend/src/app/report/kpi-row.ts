@@ -29,20 +29,9 @@ import { IngestionStatusService } from './ingestion-status.service';
         <dd class="mt-1 text-2xl text-ink-primary">{{ distinctClients() }}</dd>
       </div>
 
-      <div class="rounded-lg border border-rule bg-surface-1 p-3" data-testid="kpi-fees">
-        <dt class="text-xs uppercase tracking-wide text-ink-muted">Fees</dt>
-        <dd class="mt-1 text-sm text-ink-primary">
-          @if (feeEntries().length === 0) {
-            <span class="text-2xl">—</span>
-          } @else {
-            <!-- One figure per currency: two currencies are never added together. -->
-            @for (fee of feeEntries(); track fee.currency) {
-              <span class="tabular mr-3 whitespace-nowrap">
-                {{ fee.currency }} {{ fee.amount }}
-              </span>
-            }
-          }
-        </dd>
+      <div class="rounded-lg border border-rule bg-surface-1 p-3" data-testid="kpi-products">
+        <dt class="text-xs uppercase tracking-wide text-ink-muted">Distinct products</dt>
+        <dd class="mt-1 text-2xl text-ink-primary">{{ distinctProducts() }}</dd>
       </div>
     </dl>
   `,
@@ -59,6 +48,10 @@ export class KpiRow {
     () => new Set(this.filters.rows().map((row) => row.Client_Information)).size,
   );
 
+  protected readonly distinctProducts = computed(
+    () => new Set(this.filters.rows().map((row) => row.Product_Information)).size,
+  );
+
   protected readonly published = computed(() => this.statusService.status()?.published ?? null);
 
   /**
@@ -73,22 +66,5 @@ export class KpiRow {
     const published = this.published();
     if (published === null) return false;
     return published !== this.transactions();
-  });
-
-  /** Totals per currency, in a stable order. Negative is expected: D = debit. */
-  protected readonly feeEntries = computed(() => {
-    const totals = new Map<string, number>();
-    for (const row of this.filters.rows()) {
-      for (const [currency, amount] of Object.entries(row.feesByCurrency)) {
-        totals.set(currency, (totals.get(currency) ?? 0) + amount);
-      }
-    }
-    return [...totals.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([currency, amount]) => ({
-        currency,
-        // toFixed(2) then strip a trailing ".00" so JPY reads -120, USD reads -1.05.
-        amount: amount.toFixed(2).replace(/\.00$/, ''),
-      }));
   });
 }

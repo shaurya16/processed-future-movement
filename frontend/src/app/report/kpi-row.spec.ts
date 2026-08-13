@@ -46,12 +46,17 @@ function setup(rows: ReportEntry[], status: IngestionStatus | null, activeFilter
 describe('KpiRow', () => {
   beforeEach(() => TestBed.resetTestingModule());
 
-  it('sums trade counts and counts pairs and distinct clients', async () => {
+  it('sums trade counts and counts pairs, clients and products', async () => {
     setup(
       [
         row({ tradeCount: 3 }),
         row({ tradeCount: 4, Client_Information: 'CL123400030001' }),
-        row({ tradeCount: 5, Client_Information: 'CL123400030001', symbol: 'N1' }),
+        row({
+          tradeCount: 5,
+          Client_Information: 'CL123400030001',
+          symbol: 'N1',
+          Product_Information: 'CMEFUN120100910',
+        }),
       ],
       null,
     );
@@ -59,43 +64,14 @@ describe('KpiRow', () => {
     fixture.detectChanges();
     await fixture.whenStable();
 
-    const text = fixture.nativeElement.textContent;
-    expect(fixture.nativeElement.querySelector('[data-testid="kpi-transactions"]').textContent)
-      .toContain('12');
-    expect(fixture.nativeElement.querySelector('[data-testid="kpi-pairs"]').textContent)
-      .toContain('3');
-    expect(fixture.nativeElement.querySelector('[data-testid="kpi-clients"]').textContent)
-      .toContain('2');
-    expect(text).toBeTruthy();
-  });
+    const tile = (id: string) =>
+      fixture.nativeElement.querySelector(`[data-testid="${id}"]`).textContent;
 
-  it('renders one figure per currency and never blends them', async () => {
-    setup(
-      [
-        row({ feesByCurrency: { USD: -0.9, JPY: -120 } }),
-        row({ feesByCurrency: { USD: -0.15 } }),
-      ],
-      null,
-    );
-    const fixture = TestBed.createComponent(KpiRow);
-    fixture.detectChanges();
-    await fixture.whenStable();
-
-    const fees = fixture.nativeElement.querySelector('[data-testid="kpi-fees"]').textContent;
-    expect(fees).toContain('USD');
-    expect(fees).toContain('-1.05');
-    expect(fees).toContain('JPY');
-    expect(fees).toContain('-120');
-  });
-
-  it('shows an em dash for fees when there are none', async () => {
-    setup([row({ feesByCurrency: {} })], null);
-    const fixture = TestBed.createComponent(KpiRow);
-    fixture.detectChanges();
-    await fixture.whenStable();
-
-    expect(fixture.nativeElement.querySelector('[data-testid="kpi-fees"]').textContent)
-      .toContain('—');
+    expect(tile('kpi-transactions')).toContain('12');
+    expect(tile('kpi-pairs')).toContain('3');
+    expect(tile('kpi-clients')).toContain('2');
+    expect(tile('kpi-products')).toContain('2');
+    expect(fixture.nativeElement.querySelector('[data-testid="kpi-fees"]')).toBeNull();
   });
 
   it('warns when aggregated trades disagree with records published', async () => {
