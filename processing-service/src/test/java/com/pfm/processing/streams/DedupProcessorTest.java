@@ -40,7 +40,7 @@ class DedupProcessorTest {
                 Stores.persistentKeyValueStore(DedupProcessor.STORE_NAME), Serdes.String(), Serdes.Long()));
         KStream<String, FutureTransaction> deduped = builder
                 .stream("input-topic", Consumed.with(Serdes.String(), TransactionSerde.instance()))
-                .process(DedupProcessor::new, DedupProcessor.STORE_NAME);
+                .processValues(DedupProcessor::new, DedupProcessor.STORE_NAME);
         deduped.to("output-topic", org.apache.kafka.streams.kstream.Produced.with(
                 Serdes.String(), TransactionSerde.instance()));
 

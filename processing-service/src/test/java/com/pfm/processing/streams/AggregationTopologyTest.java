@@ -9,6 +9,7 @@ import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.TestInputTopic;
+import org.apache.kafka.streams.TopologyDescription;
 import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.test.TestRecord;
@@ -25,6 +26,7 @@ import java.time.ZoneOffset;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class AggregationTopologyTest {
@@ -36,6 +38,23 @@ class AggregationTopologyTest {
 
     private TopologyTestDriver driver;
     private TestInputTopic<String, FutureTransaction> inputTopic;
+
+    @Test
+    void topologyIsASingleSubTopologyWithNoRepartition() {
+        StreamsBuilder builder = new StreamsBuilder();
+        AggregationTopology.build(builder, TOPIC, FIXED_CLOCK);
+        TopologyDescription description = builder.build().describe();
+
+        // Dedup never changes the key, so aggregation is partition-local and nothing
+        // needs to cross the broker between the two. KStream.process() would silently
+        // reintroduce a repartition topic here (it always marks its output as needing
+        // one); processValues() does not. docs/architecture.md states this property,
+        // so the docs are wrong the moment this test fails.
+        assertEquals(1, description.subtopologies().size(),
+                "a repartition splits the topology in two; dedup must not force one");
+        assertFalse(description.toString().contains("repartition"),
+                "topology must not contain a repartition topic:\n" + description);
+    }
 
     @BeforeEach
     void setUp() {
