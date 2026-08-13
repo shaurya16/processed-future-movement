@@ -30,6 +30,10 @@ By default it reads `sample-data/Input.txt`, resolved **relative to
 `spring-boot:run` — so the `INGESTION_FILE_PATH` override above (an absolute path) is
 required unless you `cd` into `ingestion-service` first and the file happens to live there.
 
+`INGESTION_FILE_PATH` is a **host** path here. Under Docker Compose the equivalent knob
+is `PFM_INPUT_FILE` and takes a *container* path; the two are deliberately separate names
+so an exported value from this dev loop cannot follow you into `docker compose up`.
+
 In a separate terminal, once the service is up:
 
 ```bash
