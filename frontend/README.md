@@ -27,8 +27,8 @@ Open `http://localhost:4200`. The dev server proxies `/api/*` requests to
 
 ## Proxying
 
-Two upstreams are proxied, both exact-matched before the general `/api/` rule so
-routing (not application policy) enforces the split:
+Two upstreams are proxied. The status route is matched *before* the general `/api/`
+rule so routing (not application policy) enforces the split:
 
 - `GET /api/v1/ingest/status` → `ingestion-service` (`localhost:8081` in dev; see
   `nginx.conf.template`'s `INGESTION_SERVICE_UPSTREAM` in the container) — source-file
@@ -37,9 +37,15 @@ routing (not application policy) enforces the split:
   `PROCESSING_SERVICE_UPSTREAM` in the container) — the report and its CSV download.
 
 `POST /api/v1/ingest` is deliberately **not** reachable through this origin: it falls
-through the exact-match status route into the general `/api/` rule, lands on
-`processing-service`, and 404s there. The UI is a viewer and cannot trigger ingestion —
-enforced by routing, not by hiding a button.
+through the status route into the general `/api/` rule, lands on `processing-service`,
+and 404s there. The UI is a viewer and cannot trigger ingestion — enforced by routing,
+not by hiding a button.
+
+This holds on both paths, by different mechanisms, so keep the two keyed on the same
+route. nginx uses an exact `location =` match (see `nginx.conf.template`); the Angular
+dev proxy matches by **prefix**, so its key must be `/api/v1/ingest/status` and not
+`/api/v1/ingest` — the latter would proxy `POST /api/v1/ingest` straight to
+`ingestion-service` and trigger a real ingest under `ng serve`.
 
 ## Persisted preferences
 

@@ -1,5 +1,5 @@
 {
-  "/api/v1/ingest": {
+  "/api/v1/ingest/status": {
     "target": "http://localhost:8081",
     "secure": false
   },
