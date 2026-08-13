@@ -27,20 +27,21 @@ export interface ColumnDef {
 
 export const REPORT_COLUMNS: readonly ColumnDef[] = [
   // --- Client ---
+  // Order matters: this is also the render order (see ColumnPreferences.visibleColumns).
+  { id: 'clientType', label: 'Client type', group: 'Client', align: 'left', numeric: false,
+    defaultVisible: true, render: 'text', sortValue: (e) => e.clientType },
   { id: 'clientNumber', label: 'Client', group: 'Client', align: 'left', numeric: false,
     defaultVisible: true, render: 'text', sortValue: (e) => e.clientNumber },
   { id: 'accountNumber', label: 'Account', group: 'Client', align: 'left', numeric: false,
     defaultVisible: true, render: 'text', sortValue: (e) => e.accountNumber },
-  { id: 'clientType', label: 'Client type', group: 'Client', align: 'left', numeric: false,
-    defaultVisible: false, render: 'text', sortValue: (e) => e.clientType },
   { id: 'subaccountNumber', label: 'Subaccount', group: 'Client', align: 'left', numeric: false,
-    defaultVisible: false, render: 'text', sortValue: (e) => e.subaccountNumber },
+    defaultVisible: true, render: 'text', sortValue: (e) => e.subaccountNumber },
 
   // --- Product ---
   { id: 'symbol', label: 'Symbol', group: 'Product', align: 'left', numeric: false,
     defaultVisible: true, render: 'text', sortValue: (e) => e.symbol },
   { id: 'expirationDate', label: 'Expiry', group: 'Product', align: 'left', numeric: false,
-    defaultVisible: true, render: 'expiry', sortValue: (e) => e.expirationDate },
+    defaultVisible: false, render: 'expiry', sortValue: (e) => e.expirationDate },
   { id: 'exchangeCode', label: 'Exchange', group: 'Product', align: 'left', numeric: false,
     defaultVisible: false, render: 'text', sortValue: (e) => e.exchangeCode },
   { id: 'productGroupCode', label: 'Group', group: 'Product', align: 'left', numeric: false,
