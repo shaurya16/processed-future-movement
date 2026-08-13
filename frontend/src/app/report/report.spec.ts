@@ -138,4 +138,20 @@ describe('Report shell', () => {
     );
     expect(csvLink.getAttribute('href')).toBe('/api/v1/report/csv');
   });
+
+  it('reloads provenance whenever the report reloads', async () => {
+    const { reportService, statusService } = setup({ status: 'ready' });
+    const fixture = TestBed.createComponent(Report);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(statusService.load).toHaveBeenCalledTimes(1);
+
+    // What a poll tick looks like from the component's side.
+    reportService.lastLoadedAt.set(new Date());
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    // Without this, the panel sits on "Not yet ingested." while the table fills in.
+    expect(statusService.load).toHaveBeenCalledTimes(2);
+  });
 });

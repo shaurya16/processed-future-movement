@@ -71,18 +71,19 @@ describe('Report + ReportService integration', () => {
     fixture.detectChanges();
     await fixture.whenStable();
 
-    // The shell also loads provenance on init; answer it so httpMock.verify() passes.
+    // Ingestion has not run yet at page-load time -- the normal case, since the
+    // POST that triggers it happens after the UI is open.
     httpMock.expectOne('/api/v1/ingest/status').flush({
       configuredPath: 'sample-data/Input.txt',
       fileExists: true,
       fileSizeBytes: 127624,
       fileLastModified: '2026-08-12T09:14:00Z',
-      lastIngestAt: '2026-08-12T14:31:52Z',
-      fingerprint: 'fp-1',
-      totalLines: 717,
-      published: 717,
-      skipped: 0,
-      errorCount: 0,
+      lastIngestAt: null,
+      fingerprint: null,
+      totalLines: null,
+      published: null,
+      skipped: null,
+      errorCount: null,
     });
 
     httpMock.expectOne('/api/v1/report').flush(
@@ -99,6 +100,28 @@ describe('Report + ReportService integration', () => {
     httpMock.expectOne('/api/v1/report').flush(sample);
     fixture.detectChanges();
     await fixture.whenStable();
+
+    // The report arriving must refresh provenance too, or the panel stays stuck
+    // on "Not yet ingested." while the table fills in.
+    httpMock.expectOne('/api/v1/ingest/status').flush({
+      configuredPath: 'sample-data/Input.txt',
+      fileExists: true,
+      fileSizeBytes: 127624,
+      fileLastModified: '2026-08-12T09:14:00Z',
+      lastIngestAt: '2026-08-12T14:31:52Z',
+      fingerprint: 'fp-1',
+      totalLines: 717,
+      published: 717,
+      skipped: 0,
+      errorCount: 0,
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('[data-testid="not-ingested"]')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-testid="ingested-at"]').textContent,
+    ).toContain('2026');
 
     text = fixture.nativeElement.textContent;
     expect(text).not.toContain('still being generated');
