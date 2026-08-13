@@ -53,9 +53,22 @@ jobs:
           docker build -f processing-service/Dockerfile -t pfm/processing-service:local .
           docker build -t pfm/frontend:local frontend/
       - name: Create kind cluster
-        uses: helm/kind-action@v1
-        with:
-          cluster_name: pfm
+        # Deliberately not helm/kind-action. Through v1.14.0 its install_kind
+        # fetches the kind binary and its .sha256sum with plain `curl -sSLo`
+        # (no --fail, no --retry). A transient download failure leaves an HTTP
+        # error body or an empty file in place of the checksum and curl still
+        # exits 0, so the follow-up `grep ... | sha256sum -c` gets empty stdin
+        # and dies with "no properly formatted checksum lines found" — an
+        # intermittent, misleading failure we hit more than once. Upstream has
+        # since added curl --retry on main, but that is unreleased.
+        #
+        # The ubuntu-24.04 runner image (what ubuntu-latest points at) already
+        # ships kind and kubectl, so we skip the download entirely rather than
+        # retrying around it. The node image is pinned so manifest validation
+        # keeps running against a fixed API version even as the runner image
+        # bumps its bundled kind; if a future image drops kind, this fails
+        # loudly with "kind: command not found" instead of a checksum riddle.
+        run: kind create cluster --name pfm --image kindest/node:v1.36.1 --wait 60s
       - name: Validate manifests
         # kubectl apply --dry-run=client still needs a reachable API server for
         # resource-kind discovery, so this runs against the throwaway kind cluster
