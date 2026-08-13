@@ -39,20 +39,28 @@ symbol + expirationDate`.
 | Client | `entry.Client_Information` | `entry.clientNumber`, labelled **Client number** |
 | Account | `entry.accountNumber` | removed |
 | Product | `entry.Product_Information` | `entry.symbol`, labelled **Symbol** |
+| Client type | — | `entry.clientType`, new |
 | Exchange | — | `entry.exchangeCode`, new |
 | Product group | — | `entry.productGroupCode`, labelled **Group**, new |
 | Expiry | — | `entry.expirationDate`, new |
 
-The bar becomes: Client number, Exchange, Group, Symbol, Expiry, Search. Each
-dropdown is one independent dimension, so any combination of them is expressible
-— which is the point of decomposing. Selecting a client number spans all of that
-client's accounts and subaccounts; selecting an exchange spans every product
-traded there; selecting an expiry spans every product with that contract month.
+The bar becomes: Client type, Client number, Exchange, Group, Symbol, Expiry,
+Search. Each dropdown is one independent dimension, so any combination of them
+is expressible — which is the point of decomposing. Selecting a client number
+spans all of that client's accounts and subaccounts; selecting an exchange spans
+every product traded there; selecting an expiry spans every product with that
+contract month.
 
-Every component of `Product_Information` gets a filter, with no exceptions to
-explain. The alternative — filtering only the components that vary in the sample
-file — was rejected: cardinality is a property of the file loaded, not of the
-format, and a rule derived from one file would be wrong for the next one.
+The rule is: **every component of both concatenated strings gets a filter,
+except account and subaccount.** Those two are the level of detail the user
+asked to stop filtering on — an account number is meaningless without the client
+it hangs off, and the Client number filter already pins that.
+
+The alternative — filtering only the components that vary in the sample file —
+was rejected. Cardinality is a property of the file loaded, not of the format,
+so a rule derived from one file would be wrong for the next one. `clientType`,
+`productGroupCode` and `expirationDate` are each single-valued in
+`sample-data/Input.txt` and each could carry several values in another file.
 
 Removing the Account filter removes: the dropdown in `filter-bar.ts`, the
 `account` signal, `accountOptions`, `setAccount`, and the `account` entries in
@@ -68,6 +76,7 @@ Measured over all 717 sample records:
 
 | Component | Distinct values |
 |---|---|
+| `clientType` | 1 — `CL` on every record |
 | `clientNumber` | 2 — `1234`, `4321` |
 | `exchangeCode` | 2 — `CME` (511), `SGX` (206) |
 | `productGroupCode` | 1 — `FU` on every record |
@@ -76,9 +85,9 @@ Measured over all 717 sample records:
 
 Two consequences worth stating up front, so neither reads as a bug:
 
-- **Group and Expiry will show a single option** with this input. That is the
-  file, not the control. `large-7000.txt` varies both (section 5), so the
-  dropdowns can be seen doing real work.
+- **Client type, Group and Expiry will show a single option** with this input.
+  That is the file, not the control. `large-7000.txt` varies all three
+  (section 5), so the dropdowns can be seen doing real work.
 - **Exchange and symbol are independent.** The combinations present are
   `CME|N1`, `CME|NK.` and `SGX|NK`, so selecting `CME` yields 511 records across
   two symbols — a view no single symbol selection can produce. This is also why
@@ -198,15 +207,16 @@ generated data that would otherwise live in git history forever.
 
 Generated files are derived from `sample-data/Input.txt` rather than built from
 scratch: the generator reads real lines as templates and patches fixed slices —
-client number at offset 8–11, product group at 26–27, exchange at 28–31, symbol
-at 32–37, expiration date at 38–45, quantities at 53–62 and 64–73 (1-based, per
-`FieldPositions`). Every line it calls valid is therefore
+client type at offset 4–7, client number at 8–11, product group at 26–27,
+exchange at 28–31, symbol at 32–37, expiration date at 38–45, quantities at
+53–62 and 64–73 (1-based, per `FieldPositions`). Every line it calls valid is
+therefore
 layout-correct by construction, without re-implementing the 176-byte spec in a
 second language where it could drift.
 
 | File | Exercises |
 |---|---|
-| `large-7000.txt` | 7000 valid records; client number, exchange, product group, symbol and expiry all varied, so every filter dropdown has several options and the row count and KPIs are non-trivial |
+| `large-7000.txt` | 7000 valid records; client type, client number, exchange, product group, symbol and expiry all varied, so every filter dropdown has several options and the row count and KPIs are non-trivial |
 | `mixed-errors.txt` | mostly valid, a handful of bad lines — `errorCount > 0`, Failed renders red, report still populates |
 | `truncated-line.txt` | line shorter than 176 bytes |
 | `bad-quantity.txt` | non-numeric quantity field |
