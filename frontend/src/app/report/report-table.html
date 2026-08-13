@@ -77,7 +77,7 @@
                 }
                 @case ('expiry') {
                   <div class="flex items-center gap-2">
-                    <span>{{ entry.expirationDate }}</span>
+                    <span>{{ formatDate(entry.expirationDate) }}</span>
                     @if (expiry(entry).status === 'expired') {
                       <span
                         class="rounded bg-status-critical/15 px-1.5 py-0.5 text-xs text-status-critical"

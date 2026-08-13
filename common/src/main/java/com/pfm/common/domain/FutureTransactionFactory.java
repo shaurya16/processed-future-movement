@@ -12,6 +12,10 @@ public class FutureTransactionFactory {
 
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
+    /** Money fields carry two implied decimal places; the price field carries seven. */
+    private static final int MONEY_IMPLIED_DECIMALS = 2;
+    private static final int PRICE_IMPLIED_DECIMALS = 7;
+
     /**
      * @param rawLine the actual 176-character source line this record was parsed from, used
      *                verbatim (not a reconstruction from {@code raw}) in any conversion-failure
@@ -34,20 +38,20 @@ public class FutureTransactionFactory {
                 parseChar(raw.buySellCode(), "buySellCode", lineNumber, rawLine),
                 signedLong(raw.quantityLongSign(), raw.quantityLongRaw(), "quantityLong", lineNumber, rawLine),
                 signedLong(raw.quantityShortSign(), raw.quantityShortRaw(), "quantityShort", lineNumber, rawLine),
-                scaledDecimal(raw.exchBrokerFeeRaw(), raw.exchBrokerFeeDC(), 2, "exchBrokerFee", lineNumber, rawLine),
+                signedMoney(raw.exchBrokerFeeRaw(), raw.exchBrokerFeeDC(), MONEY_IMPLIED_DECIMALS, "exchBrokerFee", lineNumber, rawLine),
                 raw.exchBrokerFeeCurrency(),
                 parseDebitCredit(raw.exchBrokerFeeDC(), "exchBrokerFeeDC", lineNumber, rawLine),
-                scaledDecimal(raw.clearingFeeRaw(), raw.clearingFeeDC(), 2, "clearingFee", lineNumber, rawLine),
+                signedMoney(raw.clearingFeeRaw(), raw.clearingFeeDC(), MONEY_IMPLIED_DECIMALS, "clearingFee", lineNumber, rawLine),
                 raw.clearingFeeCurrency(),
                 parseDebitCredit(raw.clearingFeeDC(), "clearingFeeDC", lineNumber, rawLine),
-                scaledDecimal(raw.commissionRaw(), raw.commissionDC(), 2, "commission", lineNumber, rawLine),
+                signedMoney(raw.commissionRaw(), raw.commissionDC(), MONEY_IMPLIED_DECIMALS, "commission", lineNumber, rawLine),
                 raw.commissionCurrency(),
                 parseDebitCredit(raw.commissionDC(), "commissionDC", lineNumber, rawLine),
                 parseDate(raw.transactionDateRaw(), "transactionDate", lineNumber, rawLine),
                 raw.futureReference(),
                 raw.ticketNumber(),
                 raw.externalNumber(),
-                unscaledDecimal(raw.transactionPriceRaw(), 7, "transactionPrice", lineNumber, rawLine),
+                impliedDecimal(raw.transactionPriceRaw(), PRICE_IMPLIED_DECIMALS, "transactionPrice", lineNumber, rawLine),
                 raw.traderInitials(),
                 raw.oppositeTraderId(),
                 parseChar(raw.openCloseCode(), "openCloseCode", lineNumber, rawLine)
@@ -70,15 +74,16 @@ public class FutureTransactionFactory {
      * second look against the File Specification PDF's field description if this assumption
      * is ever load-bearing.
      */
-    private BigDecimal scaledDecimal(String rawValue, String debitCreditCode, int decimals, String fieldName,
-                                      int lineNumber, String rawLine) {
-        BigDecimal magnitude = unscaledDecimal(rawValue, decimals, fieldName, lineNumber, rawLine);
+    private BigDecimal signedMoney(String rawValue, String debitCreditCode, int decimals, String fieldName,
+                                    int lineNumber, String rawLine) {
+        BigDecimal magnitude = impliedDecimal(rawValue, decimals, fieldName, lineNumber, rawLine);
         char dc = parseDebitCredit(debitCreditCode, fieldName + "DC", lineNumber, rawLine);
         return dc == 'D' ? magnitude.negate() : magnitude;
     }
 
-    private BigDecimal unscaledDecimal(String rawValue, int decimals, String fieldName, int lineNumber,
-                                        String rawLine) {
+    /** Applies the format's implied decimal point: the digits are stored unscaled on the wire. */
+    private BigDecimal impliedDecimal(String rawValue, int decimals, String fieldName, int lineNumber,
+                                       String rawLine) {
         long digits = parseLong(rawValue, fieldName, lineNumber, rawLine);
         return BigDecimal.valueOf(digits, decimals);
     }

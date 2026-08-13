@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FilterBar } from './filter-bar';
 import { ReportFilters } from './report-filters';
 import { FILTER_DIMENSIONS, NO_SELECTION } from './report-filter-dimensions';
+import { REPORT_COLUMNS } from './report-columns';
 
 function setup() {
   const filters = {
@@ -131,5 +132,18 @@ describe('FilterBar', () => {
     input.dispatchEvent(new Event('input'));
 
     expect(filters.setSearch).toHaveBeenCalledWith('NK');
+  });
+});
+
+describe('FILTER_DIMENSIONS', () => {
+  it('labels every dimension exactly as the matching table column does', () => {
+    // These were two hand-maintained tables describing the same six fields, and they
+    // had drifted: the header read "Client" while the filter above it read "Client
+    // number". Labels are now derived, and this pins that they stay in step.
+    for (const dimension of FILTER_DIMENSIONS) {
+      const column = REPORT_COLUMNS.find((candidate) => candidate.id === dimension.id);
+      expect(column, `no column for filter dimension '${dimension.id}'`).toBeDefined();
+      expect(dimension.label).toBe(column!.label);
+    }
   });
 });
