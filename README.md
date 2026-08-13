@@ -190,7 +190,7 @@ does not exist.
 | **`D` = debit = negative** on the three money fields | All 717 sample records carry `D` at positions 86, 102 and 118. There is no `C` example anywhere in the sample, so the accounting convention is *assumed*, not verified from data |
 | **Quantity signs**: blank or `+` is positive, `-` negates | Standard fixed-width convention; consistent with the sample |
 | **Records are 176 bytes** with trailing `FILLER` stripped | The spec says 303 bytes; the sample file has the 127-byte trailing `FILLER` stripped. See [docs/file-spec.md](docs/file-spec.md) |
-| **`sample-output/Output.csv` is reference truth** for the sample input | Pinned by `FullPipelineGoldenTest` and `CsvFixtureDriftTest` |
+| **`sample-output/Output.csv` is reference truth** for the sample input | Pinned by `FullPipelineGoldenTest` and `FixtureDriftTest` |
 | **A single ingestion source** | See [Scalability](docs/design-notes.md#scalability) for the single-instance constraints this implies |
 
 The `D` = debit assumption in depth:
@@ -250,9 +250,9 @@ to `sample-output/Output.csv`. That exercises parsing, keying, serialization, th
 round-trip, dedup, aggregation and CSV rendering in one assertion, against the reference
 output — not against the pipeline's own idea of what it should produce.
 
-[`CsvFixtureDriftTest`](processing-service/src/test/java/com/pfm/processing/CsvFixtureDriftTest.java)
-guards the fixture itself, failing if the copy on the test classpath drifts from
-`sample-output/Output.csv`.
+[`FixtureDriftTest`](processing-service/src/test/java/com/pfm/processing/FixtureDriftTest.java)
+guards the fixtures themselves, failing if either classpath copy drifts from the shipped
+`sample-output/Output.csv` or `sample-data/Input.txt`.
 
 Beyond that: `kafka-streams-test-utils` topology tests cover dedup and aggregation without a
 broker, per-module end-to-end tests cover each service in isolation, and Vitest covers the
