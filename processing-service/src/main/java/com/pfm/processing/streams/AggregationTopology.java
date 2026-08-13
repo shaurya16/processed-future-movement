@@ -42,8 +42,10 @@ public class AggregationTopology {
         KStream<String, FutureTransaction> source = streamsBuilder.stream(
                 topic, Consumed.with(Serdes.String(), TransactionSerde.instance()));
 
+        // processValues, not process: see DedupProcessor. process() would force a
+        // repartition topic between dedup and aggregation for no benefit.
         KStream<String, FutureTransaction> deduped =
-                source.process(DedupProcessor::new, DedupProcessor.STORE_NAME);
+                source.processValues(DedupProcessor::new, DedupProcessor.STORE_NAME);
 
         deduped.groupByKey(Grouped.with(Serdes.String(), TransactionSerde.instance()))
                 .aggregate(
