@@ -39,24 +39,46 @@ The detailed diagram, the message key, dedup and the state stores are in
 
 ## Quick start
 
-Bring up the whole stack (the first run builds three images, so it takes a few minutes):
+One command builds the images, starts the stack, publishes the sample data, and prints
+the report (the first run takes a few minutes while three images build):
+
+```bash
+./scripts/run.sh
+```
+
+To ingest your own fixed-width file instead, pass it as an argument — from anywhere on
+disk, it does not need to be inside the repo:
+
+```bash
+./scripts/run.sh path/to/your-file.txt
+```
+
+The script tears down any previous run first, waits for both services to become ready,
+waits for the aggregation to converge rather than guessing at a sleep, and — for the
+sample input — verifies the output matches `sample-output/Output.csv`. Bad lines are
+reported with their line number and reason rather than stopping the run. Pass `--help`
+for details.
+
+Once it finishes, the UI is at **http://localhost:8080**:
+
+<img src="docs/images/report-ui.png" alt="Daily Summary Report UI" width="800">
+
+Stop everything, including volumes:
+
+```bash
+docker compose down -v
+```
+
+### Running it manually
+
+The script is a convenience wrapper, not a requirement. The same thing by hand:
 
 ```bash
 docker compose up -d --build
 ```
 
-Publish the sample data:
-
 ```bash
 curl -X POST http://localhost:8081/api/v1/ingest
-```
-
-Open the UI at **http://localhost:8080**.
-
-Tear down, including volumes:
-
-```bash
-docker compose down -v
 ```
 
 To run the services on the host via Maven and containerize only the broker — the loop the
@@ -98,6 +120,10 @@ Why the gate exists rather than an application-code retry:
 
 `./sample-data` is bind-mounted read-only into `ingestion-service` at `/app/sample-data`,
 so you can drop in your own `Input.txt` and re-ingest with no rebuild.
+
+`./scripts/run.sh path/to/your-file.txt` does this for you — it copies the file into the
+mount and tears down first, so the caveat below is already handled. The rest of this
+section matters when swapping files by hand.
 
 > [!IMPORTANT]
 > **The report is a running aggregate, not a snapshot of the last file ingested.**
