@@ -57,7 +57,9 @@ else
   CONTAINER_PATH="/app/sample-data/Input.txt"
   echo "Using the provided sample: sample-data/Input.txt"
 fi
-export INGESTION_FILE_PATH="$CONTAINER_PATH"
+# PFM_INPUT_FILE, not INGESTION_FILE_PATH: the latter is the service's own
+# variable and is a host path in the Maven dev loop. See docker-compose.yml.
+export PFM_INPUT_FILE="$CONTAINER_PATH"
 
 # ---------------------------------------------------------------------------
 # Clean slate

@@ -53,8 +53,10 @@ Frontend on 8080, ingestion-service 8081, processing-service 8082, Kafka 9092.
 Kubernetes (kind) path is in [k8s/README.md](k8s/README.md).
 
 `./sample-data` is mounted read-only into `ingestion-service`, so the input file
-can be swapped on the host without rebuilding the image. `INGESTION_FILE_PATH`
-overrides which file under that mount gets ingested, and
+can be swapped on the host without rebuilding the image. `PFM_INPUT_FILE`
+overrides which file under that mount compose ingests — deliberately a different
+name from the service's own `INGESTION_FILE_PATH`, which the Maven dev loop sets
+to a *host* path, so an exported value cannot leak into the container. Also,
 `python3 scripts/gen-test-data.py` writes error-case and 7000-record fixtures into
 `sample-data/generated/` — see the README. Run `docker compose down -v` between
 fixtures, or the aggregate carries over.

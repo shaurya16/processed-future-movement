@@ -160,11 +160,12 @@ python3 scripts/gen-test-data.py
 | `all-invalid.txt` | 10 | Nothing parseable — `published: 0`, empty report, no crash |
 | `empty.txt` | 0 | A zero-length file |
 
-Point the ingestion service at one with `INGESTION_FILE_PATH`:
+Point the ingestion service at one with `PFM_INPUT_FILE` — a **container** path,
+since `sample-data/` is mounted at `/app/sample-data`:
 
 ```bash
 docker compose down -v
-INGESTION_FILE_PATH=/app/sample-data/generated/large-7000.txt docker compose up -d
+PFM_INPUT_FILE=/app/sample-data/generated/large-7000.txt docker compose up -d
 curl -X POST localhost:8081/api/v1/ingest
 ```
 
@@ -172,8 +173,15 @@ curl -X POST localhost:8081/api/v1/ingest
 ingesting a different file without wiping the state stores adds to the existing
 totals rather than replacing them, and the numbers will look wrong.
 
-For the missing-file path (HTTP 404), point `INGESTION_FILE_PATH` at any path
-that does not exist.
+For the missing-file path (HTTP 404), point `PFM_INPUT_FILE` at any path that
+does not exist.
+
+> [!NOTE]
+> `PFM_INPUT_FILE` is the Compose-only knob. The service's own variable is
+> `INGESTION_FILE_PATH`, which [`ingestion-service`](ingestion-service/README.md)
+> asks you to set to a *host* path for the Maven dev loop. They are kept separate
+> so an exported dev-loop value cannot leak into the container, where that path
+> would not exist.
 
 ## Assumptions
 

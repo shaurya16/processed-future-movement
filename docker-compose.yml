@@ -42,7 +42,13 @@ services:
       PFM_TOPIC: *pfm-topic
       # Overridable so a generated fixture can be ingested without editing this
       # file; sample-data/ is already mounted, so any path under it resolves.
-      INGESTION_FILE_PATH: ${INGESTION_FILE_PATH:-/app/sample-data/Input.txt}
+      #
+      # The host-side knob is deliberately NOT called INGESTION_FILE_PATH. That
+      # name belongs to the service itself, and ingestion-service/README.md tells
+      # you to export it as a *host* path for the `mvn spring-boot:run` dev loop.
+      # Reusing it here would let an exported dev-loop value leak in and resolve
+      # to a path that does not exist inside the container.
+      INGESTION_FILE_PATH: ${PFM_INPUT_FILE:-/app/sample-data/Input.txt}
     volumes:
       # Shadows the sample-data/ copy baked into the image, so the host file can be
       # swapped for your own without rebuilding. Read-only: the service only reads it.
