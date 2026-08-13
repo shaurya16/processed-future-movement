@@ -1,54 +1,29 @@
 import { Component, inject } from '@angular/core';
 import { ReportFilters } from './report-filters';
+import { FILTER_DIMENSIONS, FilterDimensionDef } from './report-filter-dimensions';
+import { formatDate } from './format';
 
 @Component({
   selector: 'app-filter-bar',
   template: `
     <div class="flex flex-wrap items-end gap-3">
-      <label class="flex flex-col gap-1 text-xs text-ink-muted">
-        Client
-        <select
-          data-testid="filter-client"
-          class="rounded border border-rule bg-surface-1 px-2 py-1 text-sm text-ink-primary"
-          [value]="filters.client()"
-          (change)="filters.setClient($any($event.target).value)"
-        >
-          <option value="">All ({{ filters.clientOptions().length }})</option>
-          @for (option of filters.clientOptions(); track option) {
-            <option [value]="option">{{ option }}</option>
-          }
-        </select>
-      </label>
-
-      <label class="flex flex-col gap-1 text-xs text-ink-muted">
-        Account
-        <select
-          data-testid="filter-account"
-          class="rounded border border-rule bg-surface-1 px-2 py-1 text-sm text-ink-primary"
-          [value]="filters.account()"
-          (change)="filters.setAccount($any($event.target).value)"
-        >
-          <option value="">All ({{ filters.accountOptions().length }})</option>
-          @for (option of filters.accountOptions(); track option) {
-            <option [value]="option">{{ option }}</option>
-          }
-        </select>
-      </label>
-
-      <label class="flex flex-col gap-1 text-xs text-ink-muted">
-        Product
-        <select
-          data-testid="filter-product"
-          class="rounded border border-rule bg-surface-1 px-2 py-1 text-sm text-ink-primary"
-          [value]="filters.product()"
-          (change)="filters.setProduct($any($event.target).value)"
-        >
-          <option value="">All ({{ filters.productOptions().length }})</option>
-          @for (option of filters.productOptions(); track option) {
-            <option [value]="option">{{ option }}</option>
-          }
-        </select>
-      </label>
+      @for (dimension of dimensions; track dimension.id) {
+        <label class="flex flex-col gap-1 text-xs text-ink-muted">
+          {{ dimension.label }}
+          <select
+            [attr.data-testid]="'filter-' + dimension.id"
+            class="rounded border border-rule bg-surface-1 px-2 py-1 text-sm text-ink-primary"
+            [value]="filters.selection()[dimension.id]"
+            (change)="filters.setDimension(dimension.id, $any($event.target).value)"
+          >
+            <option value="">All ({{ filters.options()[dimension.id].length }})</option>
+            @for (option of filters.options()[dimension.id]; track option) {
+              <!-- value stays raw; only the label is formatted -->
+              <option [value]="option">{{ optionLabel(dimension, option) }}</option>
+            }
+          </select>
+        </label>
+      }
 
       <label class="flex flex-col gap-1 text-xs text-ink-muted">
         Search
@@ -80,4 +55,10 @@ import { ReportFilters } from './report-filters';
 })
 export class FilterBar {
   protected readonly filters = inject(ReportFilters);
+  protected readonly dimensions = FILTER_DIMENSIONS;
+
+  /** Dates are shown formatted; every other dimension is already a short code. */
+  protected optionLabel(dimension: FilterDimensionDef, option: string): string {
+    return dimension.isDate ? formatDate(option) : option;
+  }
 }
