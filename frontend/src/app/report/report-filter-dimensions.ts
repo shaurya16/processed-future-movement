@@ -39,11 +39,14 @@ export const FILTER_DIMENSIONS: readonly FilterDimensionDef[] = [
 /** '' means "all" for a dimension. */
 export type FilterSelection = Record<FilterDimensionId, string>;
 
-export const NO_SELECTION: FilterSelection = {
+// Frozen so the "callers always spread this, never mutate it" guarantee is
+// structural rather than conventional. Every caller does `{ ...NO_SELECTION }`,
+// which copies own-enumerable properties and is unaffected by freezing the source.
+export const NO_SELECTION: FilterSelection = Object.freeze({
   clientType: '',
   clientNumber: '',
   exchangeCode: '',
   productGroupCode: '',
   symbol: '',
   expirationDate: '',
-};
+});

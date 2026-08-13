@@ -46,8 +46,11 @@ describe('FilterBar', () => {
         `missing select for ${dimension.id}`,
       ).not.toBeNull();
     }
-    // Account and subaccount are deliberately not filterable.
-    expect(fixture.nativeElement.querySelector('[data-testid="filter-accountNumber"]')).toBeNull();
+    // Account and subaccount are deliberately not filterable. `filter-account`
+    // is the id the old (pre-decomposition) Account filter actually used.
+    expect(fixture.nativeElement.querySelector('[data-testid="filter-account"]')).toBeNull();
+    // Structural guard: catches any extra dropdown, not just one someone remembered to name.
+    expect(fixture.nativeElement.querySelectorAll('select').length).toBe(FILTER_DIMENSIONS.length);
   });
 
   it('populates each select from the data, plus an All option', async () => {
