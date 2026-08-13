@@ -4,6 +4,7 @@ import com.pfm.common.domain.FutureTransaction;
 import com.pfm.common.domain.FutureTransactionParser;
 import com.pfm.common.domain.ParseResult;
 import com.pfm.common.domain.ParsedRecord;
+import com.pfm.common.domain.TransactionHeaders;
 import com.pfm.common.fixedwidth.ParseError;
 import com.pfm.ingestion.kafka.KafkaKeyBuilder;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -110,7 +111,8 @@ public class IngestionService {
             String transactionId = TransactionIdBuilder.build(contentHash, parsedRecord.lineNumber());
             ProducerRecord<String, FutureTransaction> producerRecord = new ProducerRecord<>(
                     properties.topic(), null, key, transaction,
-                    List.of(new RecordHeader("transactionId", transactionId.getBytes(StandardCharsets.UTF_8))));
+                    List.of(new RecordHeader(TransactionHeaders.TRANSACTION_ID,
+                            transactionId.getBytes(StandardCharsets.UTF_8))));
             try {
                 kafkaTemplate.send(producerRecord).get(10, TimeUnit.SECONDS);
                 published++;

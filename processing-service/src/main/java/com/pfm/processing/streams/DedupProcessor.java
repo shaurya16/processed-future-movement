@@ -1,6 +1,7 @@
 package com.pfm.processing.streams;
 
 import com.pfm.common.domain.FutureTransaction;
+import com.pfm.common.domain.TransactionHeaders;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.streams.processor.api.Processor;
 import org.apache.kafka.streams.processor.api.ProcessorContext;
@@ -14,7 +15,6 @@ import java.nio.charset.StandardCharsets;
 public class DedupProcessor implements Processor<String, FutureTransaction, String, FutureTransaction> {
 
     public static final String STORE_NAME = "seen-transaction-ids";
-    public static final String TRANSACTION_ID_HEADER = "transactionId";
 
     private static final Logger log = LoggerFactory.getLogger(DedupProcessor.class);
 
@@ -43,7 +43,7 @@ public class DedupProcessor implements Processor<String, FutureTransaction, Stri
     }
 
     private String extractTransactionId(Record<String, FutureTransaction> record) {
-        Header header = record.headers().lastHeader(TRANSACTION_ID_HEADER);
+        Header header = record.headers().lastHeader(TransactionHeaders.TRANSACTION_ID);
         return header == null || header.value() == null
                 ? null
                 : new String(header.value(), StandardCharsets.UTF_8);
