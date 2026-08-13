@@ -29,8 +29,10 @@ changes.** The CSV contract (`Client_Information`, `Product_Information`,
 
 ## 1. Filters
 
-`ReportFilters` filters on three dimensions plus free-text search. After this
-change it filters on two:
+Both concatenated dimensions are decomposed into the fields they were built
+from. `Client_Information` is `clientType + clientNumber + accountNumber +
+subaccountNumber`; `Product_Information` is `exchangeCode + productGroupCode +
+symbol + expirationDate`.
 
 | Filter | Before | After |
 |---|---|---|
@@ -38,54 +40,65 @@ change it filters on two:
 | Account | `entry.accountNumber` | removed |
 | Product | `entry.Product_Information` | `entry.symbol`, labelled **Symbol** |
 | Exchange | — | `entry.exchangeCode`, new |
+| Product group | — | `entry.productGroupCode`, labelled **Group**, new |
+| Expiry | — | `entry.expirationDate`, new |
 
-Both concatenated dimensions are decomposed, not just the client one. Selecting
-a client number spans all of that client's accounts and subaccounts; selecting
-an exchange spans every product traded there; selecting a symbol spans every
-expiry. The four controls in the bar stay four: Client number, Exchange, Symbol,
-Search.
+The bar becomes: Client number, Exchange, Group, Symbol, Expiry, Search. Each
+dropdown is one independent dimension, so any combination of them is expressible
+— which is the point of decomposing. Selecting a client number spans all of that
+client's accounts and subaccounts; selecting an exchange spans every product
+traded there; selecting an expiry spans every product with that contract month.
+
+Every component of `Product_Information` gets a filter, with no exceptions to
+explain. The alternative — filtering only the components that vary in the sample
+file — was rejected: cardinality is a property of the file loaded, not of the
+format, and a rule derived from one file would be wrong for the next one.
 
 Removing the Account filter removes: the dropdown in `filter-bar.ts`, the
 `account` signal, `accountOptions`, `setAccount`, and the `account` entries in
-`FilterCriteria`, `activeFilterCount` and `clearAll`. The Exchange filter adds
-the mirror-image set.
+`FilterCriteria`, `activeFilterCount` and `clearAll`. Each new filter adds the
+mirror-image set.
 
 Nothing becomes unreachable. The free-text Search still scans the `sortValue` of
-every column, so account number, subaccount and expiry are all findable by
-typing.
+every column, so account number and subaccount stay findable by typing.
 
-### Which components of `Product_Information` earn a filter
+### What the sample data looks like through these filters
 
-`Product_Information` is `exchangeCode + productGroupCode + symbol +
-expirationDate`. Measured over all 717 sample records:
+Measured over all 717 sample records:
 
 | Component | Distinct values |
 |---|---|
+| `clientNumber` | 2 — `1234`, `4321` |
 | `exchangeCode` | 2 — `CME` (511), `SGX` (206) |
 | `productGroupCode` | 1 — `FU` on every record |
 | `symbol` | 3 — `N1` (214), `NK.` (297), `NK` (206) |
 | `expirationDate` | 1 — `20100910` on every record |
 
-Exchange and symbol are independent: the combinations present are `CME|N1`,
-`CME|NK.` and `SGX|NK`, so selecting `CME` yields 511 records across two symbols
-— a view no single symbol selection can produce. Both get a filter.
+Two consequences worth stating up front, so neither reads as a bug:
 
-Product group and expiry do not. A dropdown whose only option is "All (1)" is a
-dead control, and `productGroupCode` is structurally near-constant: `FU` is what
-a futures movement file contains. Both remain columns in the picker, reachable
-by sort and search. Expiry being constant is also why it is dropped from the
-default column set in section 2.
+- **Group and Expiry will show a single option** with this input. That is the
+  file, not the control. `large-7000.txt` varies both (section 5), so the
+  dropdowns can be seen doing real work.
+- **Exchange and symbol are independent.** The combinations present are
+  `CME|N1`, `CME|NK.` and `SGX|NK`, so selecting `CME` yields 511 records across
+  two symbols — a view no single symbol selection can produce. This is also why
+  `NK` (SGX) and `NK.` (CME), near-indistinguishable in a dropdown, are
+  separable at all.
 
-Worth noting for the UI: `NK` (SGX) and `NK.` (CME) are different products whose
-symbols are near-indistinguishable at a glance. The Exchange filter is what
-makes them separable.
+### Rendering the Expiry options
+
+`expirationDate` arrives as an ISO date string (`"2010-09-10"`), and the table
+renders it through a bespoke `expiry` template. The dropdown displays the same
+formatted text but carries the raw ISO string as the option `value`, so the
+comparison in `filterAndSort` stays an exact string match against the entry
+field. Formatting must not leak into the filter value.
 
 ### Rejected: keep filtering on the concatenated strings
 
 The concatenation (`SGXFUNK20100910`) is at least a fully-specified contract, so
-this was a real option for the Product filter. Rejected because it collapses two
+this was a real option for the Product filter. Rejected because it collapses four
 independent dimensions into one: with concatenated values there is no selection
-that means "everything on CME". Decomposing is the whole point of the change.
+that means "everything on CME", or "every product expiring in September".
 
 ## 2. Default columns
 
@@ -105,7 +118,7 @@ client number, account, subaccount.
 
 The default row becomes: Client type, Client, Account, Subaccount, Symbol, Net,
 Gross long, Gross short, Trades. Expiry remains in the column picker under
-Product; nothing is deleted.
+Product, and now also has its own filter (section 1); nothing is deleted.
 
 ### localStorage migration
 
@@ -185,15 +198,15 @@ generated data that would otherwise live in git history forever.
 
 Generated files are derived from `sample-data/Input.txt` rather than built from
 scratch: the generator reads real lines as templates and patches fixed slices —
-client number at offset 8–11, exchange at 28–31, symbol at 32–37, quantities at
-53–62 and 64–73 (1-based, per `FieldPositions`). Every line it calls valid is
-therefore
+client number at offset 8–11, product group at 26–27, exchange at 28–31, symbol
+at 32–37, expiration date at 38–45, quantities at 53–62 and 64–73 (1-based, per
+`FieldPositions`). Every line it calls valid is therefore
 layout-correct by construction, without re-implementing the 176-byte spec in a
 second language where it could drift.
 
 | File | Exercises |
 |---|---|
-| `large-7000.txt` | 7000 valid records; client numbers, exchanges and symbols varied so row count, KPIs and every filter dropdown are non-trivial |
+| `large-7000.txt` | 7000 valid records; client number, exchange, product group, symbol and expiry all varied, so every filter dropdown has several options and the row count and KPIs are non-trivial |
 | `mixed-errors.txt` | mostly valid, a handful of bad lines — `errorCount > 0`, Failed renders red, report still populates |
 | `truncated-line.txt` | line shorter than 176 bytes |
 | `bad-quantity.txt` | non-numeric quantity field |
