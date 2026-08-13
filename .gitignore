@@ -26,3 +26,7 @@ npm-debug.log*
 
 # Superpowers subagent-driven-development scratch workspace
 .superpowers/
+
+# Generated test fixtures (scripts/gen-test-data.py) -- reproducible, and
+# large-7000.txt alone is ~1.3 MB
+sample-data/generated/
