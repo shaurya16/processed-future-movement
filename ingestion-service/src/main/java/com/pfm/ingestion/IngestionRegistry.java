@@ -70,9 +70,25 @@ public class IngestionRegistry {
     }
 
     public IngestionResult forceCompute(String fingerprint, Supplier<IngestionResult> computation) {
+        return forceCompute(fingerprint, computation, result -> true);
+    }
+
+    /**
+     * Recomputes unconditionally, ignoring any cached result. Honours {@code shouldCache}
+     * exactly as {@link #getOrCompute} does — force is the documented recovery path, so it
+     * is the most likely route into a partial ingestion, and caching one here would let the
+     * next non-forced call replay it as if the file had fully landed. A result judged
+     * uncacheable also evicts the previous entry it supersedes, which is now stale.
+     */
+    public IngestionResult forceCompute(String fingerprint, Supplier<IngestionResult> computation,
+                                         Predicate<IngestionResult> shouldCache) {
         IngestionResult result = computation.get();
         lastIngest.set(new LastIngest(clock.instant(), result));
-        cache.put(fingerprint, result);
+        if (shouldCache.test(result)) {
+            cache.put(fingerprint, result);
+        } else {
+            cache.remove(fingerprint);
+        }
         return result;
     }
 }

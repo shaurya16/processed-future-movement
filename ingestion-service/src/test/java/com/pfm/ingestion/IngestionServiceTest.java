@@ -193,6 +193,31 @@ class IngestionServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void partialKafkaSendFailureUnderForceIsNotCachedEither() {
+        CompletableFuture<SendResult<String, FutureTransaction>> success = CompletableFuture.completedFuture(null);
+        CompletableFuture<SendResult<String, FutureTransaction>> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new RuntimeException("broker unreachable"));
+
+        when(kafkaTemplate.send(anyProducerRecord())).thenReturn(success, failed, success, failed);
+
+        // force=true is the documented recovery path, so it is the most likely route
+        // into a partial ingestion. It must obey the same rule as the non-forced path:
+        // a batch with un-retried send failures is never cached, or the next non-forced
+        // call replays a known-partial ingestion as if the file had fully landed.
+        IngestionResult forced = service.ingest(true);
+        assertEquals(1, forced.published());
+        assertTrue(forced.errors().stream().anyMatch(e -> e.lineNumber() == -1),
+                "expected a Kafka send failure (lineNumber -1) among the errors");
+
+        IngestionResult next = service.ingest(false);
+        assertFalse(next.cached(), "a forced partial-failure result must not be served from cache");
+        assertEquals(1, next.published());
+
+        verify(kafkaTemplate, times(4)).send(anyProducerRecord());
+    }
+
+    @Test
     void throwsIngestionFileNotFoundExceptionForMissingFile() {
         IngestionProperties missing = new IngestionProperties("does-not-exist.txt", "future-transactions");
         IngestionService missingFileService =
