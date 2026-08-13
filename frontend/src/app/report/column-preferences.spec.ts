@@ -41,8 +41,16 @@ describe('ColumnPreferences', () => {
     expect(TestBed.inject(ColumnPreferences).visibleIds()).toEqual(DEFAULT_VISIBLE_COLUMN_IDS);
   });
 
-  it('exposes seventeen definitions in total', () => {
-    expect(REPORT_COLUMNS.length).toBe(17);
+  it('gives every column a non-empty id and label', () => {
+    // Replaces an assertion on REPORT_COLUMNS.length, which failed on any legitimate
+    // column addition while saying nothing about what actually broke. The neighbouring
+    // test above pins the default visible set by id, which is the version of "the table
+    // is what we think it is" that carries information.
+    for (const column of REPORT_COLUMNS) {
+      expect(column.id).toBeTruthy();
+      expect(column.label).toBeTruthy();
+    }
+    expect(new Set(REPORT_COLUMNS.map((column) => column.id)).size).toBe(REPORT_COLUMNS.length);
   });
 
   it('preserves declaration order regardless of toggle order', () => {

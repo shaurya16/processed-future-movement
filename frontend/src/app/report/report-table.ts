@@ -66,6 +66,13 @@ export class ReportTable {
     return barGeometry(entry.Total_Transaction_Amount, this.maxAbsoluteNet());
   }
 
+  /**
+   * The expiry cell has a bespoke template (value + badge) so it bypasses cellText().
+   * Exposed so that cell formats the date the same way every other date column does,
+   * and the same way the Expiry filter dropdown does.
+   */
+  protected readonly formatDate = formatDate;
+
   protected expiry(entry: ReportEntry): ExpiryBadge {
     return expiryBadge(entry.expirationDate, entry.lastTransactionDate);
   }

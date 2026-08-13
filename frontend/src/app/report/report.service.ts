@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { timer } from 'rxjs';
+import { Subscription, timer } from 'rxjs';
 import { ReportEntry } from './report-entry';
 import { readPreference, writePreference } from '../shared/local-preference';
 
@@ -39,6 +39,9 @@ export class ReportService {
    */
   private initialFetchInFlight = false;
 
+  /** The pending 503 retry, held so a fresh load() or teardown can cancel it. */
+  private retrySubscription: Subscription | null = null;
+
   constructor() {
     const onVisibilityChange = () => this.syncPolling(true);
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -51,11 +54,15 @@ export class ReportService {
         clearInterval(this.pollTimer);
         this.pollTimer = null;
       }
+      this.cancelPendingRetry();
     });
   }
 
   /** Initial load: a failure here is fatal to the view and shows the error screen. */
   load(): void {
+    // Without this, each Retry click starts a second retry chain alongside the one
+    // still pending, permanently doubling the request rate until one succeeds.
+    this.cancelPendingRetry();
     this._status.set('loading');
     this._errorMessage.set(null);
     this._retryCount.set(0);
@@ -100,6 +107,11 @@ export class ReportService {
     }
   }
 
+  private cancelPendingRetry(): void {
+    this.retrySubscription?.unsubscribe();
+    this.retrySubscription = null;
+  }
+
   private fetch(initial: boolean): void {
     this.http.get<ReportEntry[]>('/api/v1/report').subscribe({
       next: (entries) => {
@@ -114,7 +126,8 @@ export class ReportService {
         // 503 means "Kafka Streams still starting". Worth waiting out on first
         // load; on a refresh we already have data, so just mark it stale.
         if (err.status === 503 && initial) {
-          timer(RETRY_DELAY_MS).subscribe(() => {
+          this.cancelPendingRetry();
+          this.retrySubscription = timer(RETRY_DELAY_MS).subscribe(() => {
             this._retryCount.update((count) => count + 1);
             this.fetch(true);
           });

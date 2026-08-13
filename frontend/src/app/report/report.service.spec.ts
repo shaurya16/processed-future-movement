@@ -113,6 +113,29 @@ describe('ReportService', () => {
     httpMock.match('/api/v1/report').forEach((req) => req.flush([]));
   });
 
+  it('cancels the pending retry so a fresh load() does not multiply retry chains', async () => {
+    service.load();
+    httpMock.expectOne('/api/v1/report').flush(
+      { error: 'not ready' },
+      { status: 503, statusText: 'Service Unavailable' },
+    );
+
+    // A Retry click while the previous 503 retry is still pending. The old chain must
+    // be cancelled, not left running alongside the new one.
+    service.load();
+    httpMock.expectOne('/api/v1/report').flush(
+      { error: 'not ready' },
+      { status: 503, statusText: 'Service Unavailable' },
+    );
+
+    await vi.advanceTimersByTimeAsync(3000);
+
+    const pending = httpMock.match('/api/v1/report');
+    expect(pending.length).toBe(1);
+    pending[0].flush([]);
+    expect(service.status()).toBe('ready');
+  });
+
   it('keeps incrementing retryCount past the 10-attempt threshold without capping retries', async () => {
     service.load();
 

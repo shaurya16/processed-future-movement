@@ -7,6 +7,8 @@
  * account number means nothing without the client it hangs off, and the client
  * number filter already pins that.
  */
+import { REPORT_COLUMNS } from './report-columns';
+
 export type FilterDimensionId =
   | 'clientType'
   | 'clientNumber'
@@ -26,15 +28,32 @@ export interface FilterDimensionDef {
   isDate?: boolean;
 }
 
-/** Client dimensions first, then product dimensions, matching the table's column order. */
-export const FILTER_DIMENSIONS: readonly FilterDimensionDef[] = [
-  { id: 'clientType', label: 'Client type' },
-  { id: 'clientNumber', label: 'Client number' },
-  { id: 'exchangeCode', label: 'Exchange' },
-  { id: 'productGroupCode', label: 'Group' },
-  { id: 'symbol', label: 'Symbol' },
-  { id: 'expirationDate', label: 'Expiry', isDate: true },
+/**
+ * Client dimensions first, then product dimensions, matching the table's column order.
+ *
+ * Labels are read from REPORT_COLUMNS rather than repeated here. Both tables described
+ * the same six fields, and they had already drifted: the header said "Client" while the
+ * filter above it said "Client number" for the same data. One source now, so a column
+ * rename reaches the filter bar too.
+ */
+const FILTER_DIMENSION_IDS: readonly { id: FilterDimensionId; isDate?: boolean }[] = [
+  { id: 'clientType' },
+  { id: 'clientNumber' },
+  { id: 'exchangeCode' },
+  { id: 'productGroupCode' },
+  { id: 'symbol' },
+  { id: 'expirationDate', isDate: true },
 ];
+
+export const FILTER_DIMENSIONS: readonly FilterDimensionDef[] = FILTER_DIMENSION_IDS.map(
+  ({ id, isDate }) => {
+    const column = REPORT_COLUMNS.find((candidate) => candidate.id === id);
+    if (!column) {
+      throw new Error(`Filter dimension '${id}' has no matching column in REPORT_COLUMNS`);
+    }
+    return isDate ? { id, label: column.label, isDate } : { id, label: column.label };
+  },
+);
 
 /** '' means "all" for a dimension. */
 export type FilterSelection = Record<FilterDimensionId, string>;
