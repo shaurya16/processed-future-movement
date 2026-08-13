@@ -13,8 +13,8 @@ class TransactionSerdeTest {
 
     @Test
     void roundTripsAFutureTransactionThroughSerializeAndDeserialize() {
-        Serde<FutureTransaction> producerSide = TransactionSerde.instance();
-        Serde<FutureTransaction> consumerSide = TransactionSerde.instance();
+        Serde<FutureTransaction> producerSide = TransactionSerde.create();
+        Serde<FutureTransaction> consumerSide = TransactionSerde.create();
         FutureTransaction original = new FutureTransaction(
                 "315", "CL", "4321", "0002", "0001", "SGXDC", "FU", "SGX", "NK",
                 LocalDate.of(2010, 9, 10), "JPY", "01", 'B',

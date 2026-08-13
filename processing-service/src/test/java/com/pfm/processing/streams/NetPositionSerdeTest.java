@@ -24,7 +24,7 @@ class NetPositionSerdeTest {
                 Instant.parse("2026-08-12T14:31:52Z"),
                 Map.of("USD", new BigDecimal("-0.90")));
 
-        Serde<NetPosition> serde = NetPositionSerde.instance();
+        Serde<NetPosition> serde = NetPositionSerde.create();
         NetPosition restored = serde.deserializer()
                 .deserialize(TOPIC, serde.serializer().serialize(TOPIC, original));
 
@@ -33,7 +33,7 @@ class NetPositionSerdeTest {
 
     @Test
     void roundTripsAnEmptyPositionWithNullDates() {
-        Serde<NetPosition> serde = NetPositionSerde.instance();
+        Serde<NetPosition> serde = NetPositionSerde.create();
         NetPosition restored = serde.deserializer()
                 .deserialize(TOPIC, serde.serializer().serialize(TOPIC, NetPosition.empty()));
 
@@ -46,7 +46,7 @@ class NetPositionSerdeTest {
                 LocalDate.of(2010, 8, 19), LocalDate.of(2010, 8, 19),
                 Instant.parse("2026-08-12T14:31:52Z"), Map.of());
 
-        String json = new String(NetPositionSerde.instance().serializer().serialize(TOPIC, position));
+        String json = new String(NetPositionSerde.create().serializer().serialize(TOPIC, position));
 
         assertTrue(json.contains("\"2010-08-19\""), json);
         assertTrue(json.contains("2026-08-12T14:31:52Z"), json);

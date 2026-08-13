@@ -66,7 +66,7 @@ class AggregationTopologyTest {
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy:9092");
         driver = new TopologyTestDriver(builder.build(), props);
 
-        inputTopic = driver.createInputTopic(TOPIC, Serdes.String().serializer(), TransactionSerde.instance().serializer());
+        inputTopic = driver.createInputTopic(TOPIC, Serdes.String().serializer(), TransactionSerde.create().serializer());
     }
 
     @AfterEach

@@ -40,20 +40,20 @@ public class AggregationTopology {
                 Stores.persistentKeyValueStore(DedupProcessor.STORE_NAME), Serdes.String(), Serdes.Long()));
 
         KStream<String, FutureTransaction> source = streamsBuilder.stream(
-                topic, Consumed.with(Serdes.String(), TransactionSerde.instance()));
+                topic, Consumed.with(Serdes.String(), TransactionSerde.create()));
 
         // processValues, not process: see DedupProcessor. process() would force a
         // repartition topic between dedup and aggregation for no benefit.
         KStream<String, FutureTransaction> deduped =
                 source.processValues(DedupProcessor::new, DedupProcessor.STORE_NAME);
 
-        deduped.groupByKey(Grouped.with(Serdes.String(), TransactionSerde.instance()))
+        deduped.groupByKey(Grouped.with(Serdes.String(), TransactionSerde.create()))
                 .aggregate(
                         NetPosition::empty,
                         (key, transaction, position) -> position.plus(transaction, clock.instant()),
                         Materialized.<String, NetPosition, KeyValueStore<Bytes, byte[]>>as(NET_QUANTITY_STORE)
                                 .withKeySerde(Serdes.String())
-                                .withValueSerde(NetPositionSerde.instance()));
+                                .withValueSerde(NetPositionSerde.create()));
 
         return deduped;
     }
