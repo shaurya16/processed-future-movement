@@ -2,7 +2,10 @@ import { Injectable, computed, signal } from '@angular/core';
 import { readPreference, writePreference } from '../shared/local-preference';
 import { ColumnDef, DEFAULT_VISIBLE_COLUMN_IDS, REPORT_COLUMNS } from './report-columns';
 
-const STORAGE_KEY = 'pfm.visibleColumns';
+// Bumped from 'pfm.visibleColumns' when the default set changed: a stored value
+// always wins over the defaults, so without a new key nobody would ever see the
+// new columns. The old key is left to expire rather than migrated.
+const STORAGE_KEY = 'pfm.visibleColumns.v2';
 
 @Injectable({ providedIn: 'root' })
 export class ColumnPreferences {
